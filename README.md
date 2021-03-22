@@ -8,3 +8,5 @@ circuits into different types of hardware without changing the high-level design
 
 There is not currently much documentation, but `setup.md` outlines the high-level concepts in a (slightly outdated) way.
 This library is under development and subject to rapid changes.
+
+See also the `SpikingCircuits.jl` library, which defines the `Spiking` hardware target, the primitive values/components for this target, and a spiking neural network simulator.
