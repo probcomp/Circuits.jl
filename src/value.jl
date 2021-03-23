@@ -126,6 +126,8 @@ Base.pairs(v::CompositeValue) = Base.pairs(v.vals)
 Base.keys(v::CompositeValue) = Base.keys(v.vals)
 Base.values(v::CompositeValue) = Base.values(v.vals)
 Base.length(v::CompositeValue) = Base.length(v.vals)
+Base.:(==)(a::CompositeValue, b::CompositeValue) = a.vals == b.vals
+Base.hash(a::CompositeValue, h::UInt) = hash(a.vals, h)
 
 """
     Base.map(f, v::CompositeValue)

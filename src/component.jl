@@ -204,6 +204,12 @@ Base.:(==)(a::CompOut, b::CompOut) = (a.comp_name == b.comp_name && a.out_name =
 Base.hash(i::CompIn, h::UInt) = hash(i.comp_name, hash(i.in_name, h))
 Base.hash(o::CompOut, h::UInt) = hash(o.comp_name, hash(o.out_name, h))
 
+Base.show(io::IO, i::Input) = print(io, "Input($(valname(i)))")
+Base.show(io::IO, i::Output) = print(io, "Output($(valname(i)))")
+Base.show(io::IO, i::CompIn) = print(io, "CompIn($(i.comp_name), $(valname(i)))")
+Base.show(io::IO, i::CompOut) = print(io, "CompOut($(i.comp_name), $(valname(i)))")
+Base.show(io::IO, ::MIME"text/plain", n::NodeName) = show(io, n)
+
 valname(v::Union{Input, Output}) = v.id
 valname(v::CompIn) = v.in_name
 valname(v::CompOut) = v.out_name
@@ -296,10 +302,12 @@ end
         input=c.input,
         output=c.output,
         subcomponents=c.subcomponents,
-        subcomponent_map::Union{Function, Nothing}=nothing
+        subcomponent_map::Union{Function, Nothing}=nothing,
+        abstract=c.abstract
     )
 
-Duplicate of `c::CompositeComponent`, but with changed input and/or output and/or subcomponents.
+Duplicate of `c::CompositeComponent`, but with changed input and/or output and/or subcomponents
+and/or abstract version.
 
 Kwarg `subcomponents` can be used to replace the subcomponents.
 If a function `subcomponent_map` is given, it will be applied to each element of the given
@@ -310,11 +318,12 @@ CompositeComponent(
     input=c.input,
     output=c.output,
     subcomponents=c.subcomponents,
-    subcomponent_map::Union{Function, Nothing}=nothing
+    subcomponent_map::Union{Function, Nothing}=nothing,
+    abstract=c.abstract
 ) = CompositeComponent(
     input, output,
     subcomponent_map === nothing ? subcomponents : map(subcomponent_map, subcomponents),
-    c.node_to_idx, c.idx_to_node, c.graph, c.abstract
+    c.node_to_idx, c.idx_to_node, c.graph, abstract
 )
 
 inputs(c::CompositeComponent) = c.input
@@ -324,6 +333,17 @@ abstract(c::CompositeComponent) = c.abstract
 Base.getindex(c::CompositeComponent, ::Nothing) = c
 Base.getindex(c::CompositeComponent, p::Pair) = c[p.first][p.second]
 Base.getindex(c::CompositeComponent, name) = c.subcomponents[name]
+
+Base.:(==)(a::CompositeComponent, b::CompositeComponent) = (
+       inputs(a) == inputs(b)
+    && outputs(a) == outputs(b)
+    && a.subcomponents == b.subcomponents
+    && all(has_edge(a, edge) for edge in get_edges(b))
+    && all(has_edge(b, edge) for edge in get_edges(a))
+    # Equality does not rely on having the same abstract component!
+    # && abstract(a) == abstract(b)
+)
+Base.hash(a::CompositeComponent, h::UInt) = hash(inputs(a), hash(outputs(a), hash(subcomponents(a), hash(collect(get_edges(a)), h))))
 
 """
     Base.map(f, c::CompositeComponent)
@@ -343,6 +363,9 @@ get_edges(c::CompositeComponent) = (
         c.idx_to_node[src(edge)] => c.idx_to_node[dst(edge)]
         for edge in edges(c.graph)
     )
+
+has_edge(c::CompositeComponent, (src, dst)) =
+    Edge(c.node_to_idx[src], c.node_to_idx[dst]) in edges(c.graph)
 
 is_implementation_for(c::CompositeComponent, t::Target) =
     is_implementation_for(inputs(c), t) && is_implementation_for(outputs(c), t) && all(
@@ -364,28 +387,89 @@ passes `input_filter`, and each output whose name passes `output_filter`.
 If `deep` is false, `implement` will be used for recursive calls (shallow one-step implement);
 if `deep` is true, `implement_deep` will be used (fully implementing `c` for `t`).
 """
-implement(c::CompositeComponent, t::Target,
+function implement(c::CompositeComponent, t::Target,
     subcomponent_filter::Function = (n -> true),
     input_filter::Function = (n -> true),
     output_filter::Function = (n -> true);
     deep=false
-) =
-    CompositeComponent(
-        implement(inputs(c), t, input_filter; deep),
-        implement(outputs(c), t, output_filter; deep),
-        map(names(c.subcomponents), c.subcomponents) do name, subcomp
-            if subcomponent_filter(name)
-                if deep
-                    implement_deep(subcomp, t)
-                else
-                    implement(subcomp, t)
-                end
+)
+    new_in = implement(inputs(c), t, input_filter; deep)
+    new_out = implement(outputs(c), t, output_filter; deep)
+    new_comps = map(names(c.subcomponents), c.subcomponents) do name, subcomp
+        if subcomponent_filter(name)
+            if deep
+                implement_deep(subcomp, t)
             else
-                subcomp
+                implement(subcomp, t)
             end
-        end,
-        c.node_to_idx, c.idx_to_node, c.graph, c
-    )
+        else
+            subcomp
+        end
+    end
+
+    new_idx_to_node = collect(Iterators.flatten((
+        (Input(k) for k in keys_deep(new_in)), (Output(k) for k in keys_deep(new_out)),
+        (CompIn(compname, inname) for (compname, subcomp) in pairs(new_comps) for inname in keys_deep(inputs(subcomp))),
+        (CompOut(compname, outname) for (compname, subcomp) in pairs(new_comps) for outname in keys_deep(outputs(subcomp)))
+    )))
+    new_node_to_idx = Dict{NodeName, UInt}(name => idx for (idx, name) in enumerate(new_idx_to_node))
+
+    new_graph =  # try
+        SimpleDiGraphFromIterator(
+            Iterators.map(
+                ((src, dst),) -> Edge(new_node_to_idx[src], new_node_to_idx[dst]),
+                Iterators.flatten(
+                    expand_edges(edge, new_in, new_out, new_comps)
+                    for edge in get_edges(c)
+                )
+            )
+        )
+    # catch e
+    #     println("idx_to_node:")
+    #     display(new_idx_to_node)
+    #     println("keys of node_to_idx:")
+    #     display(new_node_to_idx |> keys |> collect)
+    #     println("all_edges:")
+    #     display(
+    #         collect(
+    #             Iterators.flatten(
+    #                 expand_edges(edge, new_in, new_out, new_comps)
+    #                 for edge in get_edges(c)
+    #             )
+    #         )
+    #     )
+    #     for (src, dst) in Iterators.flatten(
+    #             expand_edges(edge, new_in, new_out, new_comps)
+    #             for edge in get_edges(c)
+    #         )
+    #             @assert any(i == src for i in keys(new_node_to_idx))
+    #             println(new_node_to_idx[src])
+    #             println(new_node_to_idx[dst])
+    #     end
+    #     throw(e)
+    # end
+
+    return CompositeComponent(new_in, new_out, new_comps, new_node_to_idx, new_idx_to_node, new_graph, c)
+end
+
+function expand_edges((src, dst), new_in, new_out, new_comps)
+    src_wrapper, src_val = get_val(src, new_in, new_out, new_comps)
+    dst_wrapper, dst_val = get_val(dst, new_in, new_out, new_comps)
+    @assert (src_val == dst_val) "While implementing a CompositeComponent, implementing values on edge $src → $dst led to mismatch: $src_val → $dst_val."
+    
+    if src_val isa CompositeValue
+        return (
+            src_wrapper(key) => dst_wrapper(key)
+            for key in keys_deep(src_val)
+        )
+    else
+        return (src => dst,)
+    end
+end
+get_val(name::Input, new_in, _, _) = (remainder -> Input(nest(valname(name), remainder)), new_in[valname(name)])
+get_val(name::Output, _, new_out, _) = (remainder -> Output(nest(valname(name), remainder)), new_out[valname(name)])
+get_val(name::CompIn, _, _, new_comps) = (remainder -> CompIn(name.comp_name, nest(valname(name), remainder)), inputs(new_comps[name.comp_name])[valname(name)])
+get_val(name::CompOut, _, _, new_comps) = (remainder -> CompOut(name.comp_name, nest(valname(name), remainder)), outputs(new_comps[name.comp_name])[valname(name)])
 
 """
     implement(c::CompositeComponent, t::Target, subcomp_names...)
