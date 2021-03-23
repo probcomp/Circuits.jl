@@ -127,6 +127,14 @@ Base.keys(v::CompositeValue) = Base.keys(v.vals)
 Base.values(v::CompositeValue) = Base.values(v.vals)
 Base.length(v::CompositeValue) = Base.length(v.vals)
 
+"""
+    Base.map(f, v::CompositeValue)
+
+A CompositeValue with `f` applied to each subvalue of `v`.
+"""
+Base.map(f, v::CompositeValue) =
+    CompositeValue(map(f, v.vals), v.abstract)
+
 # TODO: performance
 length_deep(v::CompositeValue) = reduce(+, length_deep(sv) for sv in values(v); init=0)
 length_deep(::PrimitiveValue) = 1

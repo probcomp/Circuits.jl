@@ -289,6 +289,34 @@ function CompositeComponent(
 
     CompositeComponent(input, output, subcomponents, node_to_idx, idx_to_node, graph, abstract)
 end
+
+"""
+    CompositeComponent(
+        c::CompositeComponent;
+        input=c.input,
+        output=c.output,
+        subcomponents=c.subcomponents,
+        subcomponent_map::Union{Function, Nothing}=nothing
+    )
+
+Duplicate of `c::CompositeComponent`, but with changed input and/or output and/or subcomponents.
+
+Kwarg `subcomponents` can be used to replace the subcomponents.
+If a function `subcomponent_map` is given, it will be applied to each element of the given
+or previous `subcomponents` to yield subcomponents for the new component.
+"""
+CompositeComponent(
+    c::CompositeComponent;
+    input=c.input,
+    output=c.output,
+    subcomponents=c.subcomponents,
+    subcomponent_map::Union{Function, Nothing}=nothing
+) = CompositeComponent(
+    input, output,
+    subcomponent_map === nothing ? subcomponents : map(subcomponent_map, subcomponents),
+    c.node_to_idx, c.idx_to_node, c.graph, c.abstract
+)
+
 inputs(c::CompositeComponent) = c.input
 outputs(c::CompositeComponent) = c.output
 abstract(c::CompositeComponent) = c.abstract
@@ -296,6 +324,15 @@ abstract(c::CompositeComponent) = c.abstract
 Base.getindex(c::CompositeComponent, ::Nothing) = c
 Base.getindex(c::CompositeComponent, p::Pair) = c[p.first][p.second]
 Base.getindex(c::CompositeComponent, name) = c.subcomponents[name]
+
+"""
+    Base.map(f, c::CompositeComponent)
+
+A CompositeComponent with `f` applied to each subcomponent of `c`.
+All connections & values are the same.
+"""
+Base.map(f, c::CompositeComponent) =
+    CompositeComponent(c.input, c.output, map(f, c.subcomponents), c.node_to_idx, c.idx_to_node, c.graph, c.abstract)
 
 """
     get_edges(c::CompositeComponent)
@@ -436,17 +473,3 @@ A `ComponentGroup` with subcomponent named via keys given keys, given a `subcomp
 iterator over `(key::Symbol, subcomponent)` pairs.
 """
 NamedComponentGroup(n) = ComponentGroup(NamedTuple(n))
-
-# TODO: figure out the details of Junction.  Do we want one `Junction` concrete type, or instead
-# something like a `Junction` abstract type with concrete subtypes `ValSplit`, `ValMerge`, and some combiner?
-"""
-    Junction <: PrimitiveComponent{Target}
-
-A Junction reroutes Values, for instance joining values together or splitting a Value into several.
-It is a primitive component for every target.
-
-Implementation & details of how this works: TODO
-"""
-struct Junction <: PrimitiveComponent{Target}
-
-end
