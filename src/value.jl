@@ -204,6 +204,33 @@ Implement or implement deep all subvalues of `v` whose name is in `names`.
 implement(v::CompositeValue, t::Target, names...; kwargs...) = implement(v, t, in(names); kwargs...)
 implement_deep(v::CompositeValue, t::Target, names...) = implement(v, t, names...; deep=true)
 
+"""
+    NestedCompositeValue(itr)
+
+Given an iterator over `(key, value)` pairs, where each `key` is a nested value name
+(ie. an `Int`, `Symbol`, or a nested `Pair` of these), constructs a nested `CompositeValue`
+with the given values at the given nested keys.
+"""
+function NestedCompositeValue(itr)
+    top = Dict()
+    for (key, val) in itr
+        if key isa Pair
+            top[key.first] = push!(get(top, key.first, []), (key.second, val))
+        else
+            top[key] = val
+        end
+    end
+    subvals = Dict(key => val isa Vector ? nested_composite_value(val) : val for (key, val) in top)
+    if all(k isa Int for k in keys(subvals))
+        @assert length(subvals) == maximum(values(subvals); init=0)
+        return IndexedValues([subvals[i] for i=1:length(subvals)])
+    elseif all(k isa Symbol for k in keys(subvals))
+        return NamedValues(subvals...)
+    else
+        error("unexpected key: $k")
+    end
+end
+
 ### Binary ###
 """
     Binary <: GenericValue

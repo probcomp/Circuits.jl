@@ -214,6 +214,16 @@ valname(v::Union{Input, Output}) = v.id
 valname(v::CompIn) = v.in_name
 valname(v::CompOut) = v.out_name
 
+# """
+#     append_to_valname(n::NodeName, rest)
+
+# Returns a new nodename which is like the first, but with `rest` nested at the end of the value's name.
+# """
+# append_to_valname(i::Input, rest) = Input(nest(valname(i), rest))
+# append_to_valname(o::Output, rest) = Output(nest(valname(i), rest))
+# append_to_valname(i::CompIn, rest) = CompIn(i.comp_name, nest(valname(i), rest))
+# append_to_valname(i::CompOut, rest) = CompOut(i.comp_name, nest(valname(i), rest))
+
 # TODO: better docstring here?
 """
     CompositeComponent <: Component
@@ -291,7 +301,12 @@ function CompositeComponent(
         end
         throw(e)
     end
-    @assert nv(graph) == length(idx_to_node)
+    if nv(graph) != length(idx_to_node)
+        unused = [idx_to_node[i] for i=1:length(idx_to_node) if !(i in vertices(graph))]
+        # TODO: This probably shouldn't be an error
+        @error("Not all vertices used in edges to construct CompositeComponent graph!\nThe following did not appear:\n$unused")
+        error()
+    end
 
     CompositeComponent(input, output, subcomponents, node_to_idx, idx_to_node, graph, abstract)
 end
@@ -374,27 +389,30 @@ is_implementation_for(c::CompositeComponent, t::Target) =
 
 """
     implement(c::CompositeComponent, t::Target,
-        subcomponent_filter::Function = (n -> true),
+        subcomponent_filter::Function = (n -> true);
         input_filter::Function = (n -> true),
-        output_filter::Function = (n -> true);
+        output_filter::Function = (n -> true)
         deep=false
     )
 
 Make progress implementing `c` for `t`.  Implement each subcomponent
-whose name passes `subcomponent_filter`, each input value whose name
-passes `input_filter`, and each output whose name passes `output_filter`.
+whose name passes `subcomponent_filter`.  Each input/output will be implemented
+as deeply as is needed for it to match any `CompIn`s or `CompOut`s it is connected to.
+    If no inputs or outputs are connected to subcomponents, 
+each input value whose name
+passes `input_filter`, and each output whose name passes `output_filter` will be implemented.
 
 If `deep` is false, `implement` will be used for recursive calls (shallow one-step implement);
 if `deep` is true, `implement_deep` will be used (fully implementing `c` for `t`).
 """
 function implement(c::CompositeComponent, t::Target,
-    subcomponent_filter::Function = (n -> true),
+    subcomponent_filter::Function = (n -> true);
     input_filter::Function = (n -> true),
-    output_filter::Function = (n -> true);
+    output_filter::Function = (n -> true),
     deep=false
 )
-    new_in = implement(inputs(c), t, input_filter; deep)
-    new_out = implement(outputs(c), t, output_filter; deep)
+    # TODO: be smarter about which subcomponents we implement, so that we don't
+    # end up connecting values implemented to different levels
     new_comps = map(names(c.subcomponents), c.subcomponents) do name, subcomp
         if subcomponent_filter(name)
             if deep
@@ -407,6 +425,13 @@ function implement(c::CompositeComponent, t::Target,
         end
     end
 
+    # now we want to implement the top-level inputs/outputs so that they are compatible
+    # with the `CompIn` and `CompOut` from the subcomponents
+    new_in, new_out = implement_inputs_and_outputs(c, new_comps, input_filter, output_filter, t, deep)
+
+    # new_in = implement(inputs(c), t, input_filter; deep)
+    # new_out = implement(outputs(c), t, output_filter; deep)
+
     new_idx_to_node = collect(Iterators.flatten((
         (Input(k) for k in keys_deep(new_in)), (Output(k) for k in keys_deep(new_out)),
         (CompIn(compname, inname) for (compname, subcomp) in pairs(new_comps) for inname in keys_deep(inputs(subcomp))),
@@ -414,42 +439,81 @@ function implement(c::CompositeComponent, t::Target,
     )))
     new_node_to_idx = Dict{NodeName, UInt}(name => idx for (idx, name) in enumerate(new_idx_to_node))
 
-    new_graph =  # try
-        SimpleDiGraphFromIterator(
-            Iterators.map(
-                ((src, dst),) -> Edge(new_node_to_idx[src], new_node_to_idx[dst]),
-                Iterators.flatten(
-                    expand_edges(edge, new_in, new_out, new_comps)
-                    for edge in get_edges(c)
-                )
+    new_graph = SimpleDiGraphFromIterator(
+        Iterators.map(
+            ((src, dst),) -> Edge(new_node_to_idx[src], new_node_to_idx[dst]),
+            Iterators.flatten(
+                expand_edges(edge, new_in, new_out, new_comps)
+                for edge in get_edges(c)
             )
         )
-    # catch e
-    #     println("idx_to_node:")
-    #     display(new_idx_to_node)
-    #     println("keys of node_to_idx:")
-    #     display(new_node_to_idx |> keys |> collect)
-    #     println("all_edges:")
-    #     display(
-    #         collect(
-    #             Iterators.flatten(
-    #                 expand_edges(edge, new_in, new_out, new_comps)
-    #                 for edge in get_edges(c)
-    #             )
-    #         )
-    #     )
-    #     for (src, dst) in Iterators.flatten(
-    #             expand_edges(edge, new_in, new_out, new_comps)
-    #             for edge in get_edges(c)
-    #         )
-    #             @assert any(i == src for i in keys(new_node_to_idx))
-    #             println(new_node_to_idx[src])
-    #             println(new_node_to_idx[dst])
-    #     end
-    #     throw(e)
-    # end
+    )
 
     return CompositeComponent(new_in, new_out, new_comps, new_node_to_idx, new_idx_to_node, new_graph, c)
+end
+# implement the inputs and outputs for a CompositeComponent deeply enough that they match
+# the `CompIn`s and `CompOut`s which they are connected to
+function implement_inputs_and_outputs(c, new_comps, input_filter, output_filter, target, deep)
+    # first, we figure out which `CompOut`s lead to outputs, and which `CompIn`s lead to inputs
+    input_connections = Dict()
+    output_connections = Dict()
+    for (src, dst) in get_edges(c)
+        if dst isa Input && src isa CompIn
+            input_connections[dst] = push!(get(input_connections, dst, []), src)
+        end
+        if dst isa Output && src isa CompOut
+            output_connections[dst] = push!(get(input_connections, dst, []), src)
+        end
+    end
+    
+    # implement the values to the correct thing
+    # (we implement to this rather than just using the CompIn/CompOut value so that we can error check
+    # in case this implementation is impossible)
+    inval(compin) = inputs(new_comps[compin.comp_name])[valname(compin)]
+    outval(compout) = outputs(new_comps[compout.comp_name])[valname(compout)]
+    get_new_input(key) =
+        if haskey(input_connections, Input(key))
+            val = inval(first(input_connections[Input(key)]))
+            @assert all(inval(compin) == val for compin in input_connections[Input(key)]) "Implementing this CompositeComponent leads to `CompIn`s which are connected to the same output being implemented at different levels!"
+            implement_to(key, inputs(c)[key], val, target)
+        else
+            if input_filter(key)
+                implement(inputs(c)[key], target; deep)
+            else
+                inputs(c)[key]
+            end
+        end
+    get_new_output(key) =
+        if haskey(output_connections, Output(key))
+            val = outval(first(output_connections[Output(key)]))
+            @assert all(outval(compout) == val for compout in output_connections[Output(key)]) "Implementing this CompositeComponent leads to `CompOut`s which are connected to the same output being implemented at different levels!"
+            implement_to(key, outputs(c)[key], val, target)
+        else
+            if output_filter(key)
+                implement(outputs(c)[key], target; deep)
+            else
+                outputs(c)[key]
+            end
+        end
+
+    # construct the new inputs/outputs
+    return (
+        NestedCompositeValue(key => get_new_input(key) for key in keys_deep(inputs(c))),
+        NestedCompositeValue(key => get_new_output(key) for key in keys_deep(outputs(c)))
+    )
+end
+
+function implement_to(key, val, goal, target)
+    val1 = val
+    try
+        while val != goal
+            val = implement(val, target)
+        end
+    catch e
+        @error("While implementing a CompositeComponent, to implement $key to match a subcomponent output/input, we have to implement $val to become $goal, which does not occur.")
+        error(e)
+    end
+    return val
 end
 
 function expand_edges((src, dst), new_in, new_out, new_comps)
