@@ -32,6 +32,20 @@ struct CompositeComponent <: Component #{InID, OutID, SC} <: Component
 end
 CompositeComponent(i, o, sc, ni, in, g) = new(i, o, sc, ni, in, g, nothing)
 
+function _digraph_from_iter(itr, idx_to_node)
+    graph = try
+        SimpleDiGraphFromIterator(itr)
+    catch e
+        if e isa KeyError && e.key isa NodeName
+            @error("$(e.key) used in `edges` but does not match the nodenames derived from `input`, `output`, and `subcomponents`")
+        end
+        throw(e)
+    end
+    add_vertices!(graph, length(idx_to_node) - nv(graph))
+    @assert nv(graph) == length(idx_to_node)
+    return graph
+end
+
 """
     CompositeComponent(
         input::CompositeValue, output::CompositeValue,
@@ -58,20 +72,7 @@ function CompositeComponent(
     )))
     node_to_idx = Dict{NodeName, UInt}(name => idx for (idx, name) in enumerate(idx_to_node))
 
-    graph = try
-        SimpleDiGraphFromIterator((Edge(node_to_idx[src_name], node_to_idx[dst_name]) for (src_name, dst_name) in edges))
-    catch e
-        if e isa KeyError && e.key isa NodeName
-            @error("$(e.key) used in `edges` but does not match the nodenames derived from `input`, `output`, and `subcomponents`")
-        end
-        throw(e)
-    end
-    if nv(graph) != length(idx_to_node)
-        unused = [idx_to_node[i] for i=1:length(idx_to_node) if !(i in vertices(graph))]
-        # TODO: This probably shouldn't be an error
-        @error("Not all vertices used in edges to construct CompositeComponent graph!\nThe following did not appear:\n$unused")
-        error()
-    end
+    graph = _digraph_from_iter((Edge(node_to_idx[src_name], node_to_idx[dst_name]) for (src_name, dst_name) in edges), idx_to_node)
 
     CompositeComponent(input, output, subcomponents, node_to_idx, idx_to_node, graph, abstract)
 end
@@ -204,15 +205,13 @@ function implement(c::CompositeComponent, t::Target,
     )))
     new_node_to_idx = Dict{NodeName, UInt}(name => idx for (idx, name) in enumerate(new_idx_to_node))
 
-    new_graph = SimpleDiGraphFromIterator(
-        Iterators.map(
-            ((src, dst),) -> Edge(new_node_to_idx[src], new_node_to_idx[dst]),
-            Iterators.flatten(
-                expand_edges(edge, new_in, new_out, new_comps, c)
-                for edge in get_edges(c)
-            )
+    new_graph = _digraph_from_iter(Iterators.map(
+        ((src, dst),) -> Edge(new_node_to_idx[src], new_node_to_idx[dst]),
+        Iterators.flatten(
+            expand_edges(edge, new_in, new_out, new_comps, c)
+            for edge in get_edges(c)
         )
-    )
+    ), new_idx_to_node)
 
     return CompositeComponent(new_in, new_out, new_comps, new_node_to_idx, new_idx_to_node, new_graph, c)
 end
@@ -321,10 +320,13 @@ True if the node with the given name is connected to an `Output`; false false ot
 """
 # TODO: should we try to be smart about whether we iterate through the neighbors or the outputs?
 does_output(c::CompositeComponent, name::Union{Input, CompOut}) =
+begin
+    @assert c.node_to_idx[name] <= nv(c.graph)
     any(
         c.idx_to_node[idx] isa Output
         for idx in neighbors(c.graph, c.node_to_idx[name])
     )
+end
 
 """
     receivers(c::CompositeComponent: name::NodeName)
