@@ -38,6 +38,7 @@ function _digraph_from_iter(itr, idx_to_node)
     catch e
         if e isa KeyError && e.key isa NodeName
             @error("$(e.key) used in `edges` but does not match the nodenames derived from `input`, `output`, and `subcomponents`")
+            display(collect(values(idx_to_node)))
         end
         throw(e)
     end
@@ -45,6 +46,50 @@ function _digraph_from_iter(itr, idx_to_node)
     @assert nv(graph) == length(idx_to_node)
     return graph
 end
+
+function expand_edge(src::NodeName, dst::NodeName, input, output, subcomponents, node_to_idx)
+    if src in keys(node_to_idx)
+        # no expansion necessary
+        @assert dst in keys(node_to_idx)
+        return (src => dst,)
+    else
+        src_ext = name_extensions(src, input, output, subcomponents)
+        dst_ext = name_extensions(dst, input, output, subcomponents)
+        @assert Set(src_ext) == Set(dst_ext)
+        return (
+            append_to_valname(src, ext) => append_to_valname(dst, ext)
+            for ext in src_ext
+        )
+    end
+end
+
+"""
+    name_extensions(n::NodeName, c::CompositeComponnet)
+
+Given a nodename `n` where `v = valname(n)`, this returns an iterator over all the extensions to `v`
+so that the resulting value-name is a deep index into a node in `c`.
+
+(In other words, finds all remainders `r` such that `append_to_valname(v, r)` is a deep nodename in `c`.)
+"""
+name_extensions(v::Input, input, _, _) = _name_extensions(input, v)
+name_extensions(v::Output, _, output, _) = _name_extensions(output, v)
+name_extensions(v::CompIn, _, _, subcomponents) = _name_extensions(inputs(subcomponents[v.comp_name]), v)
+name_extensions(v::CompOut, _, _, subcomponents) = _name_extensions(outputs(subcomponents[v.comp_name]), v)
+_name_extensions(val, v) = keys_deep(val[valname(v)])
+
+extended_idx_edge_itr(input, output, subcomponents, edges, node_to_idx) = idx_edge_itr(
+    Iterators.flatten(
+        Iterators.map(
+            edge -> expand_edge(edge..., input, output, subcomponents, node_to_idx),
+            edges
+        )
+    ),
+    node_to_idx
+)
+idx_edge_itr(edges, node_to_idx) = (
+    Edge(node_to_idx[src_name], node_to_idx[dst_name])
+    for (src_name, dst_name) in edges
+)
 
 """
     CompositeComponent(
@@ -72,7 +117,10 @@ function CompositeComponent(
     )))
     node_to_idx = Dict{NodeName, UInt}(name => idx for (idx, name) in enumerate(idx_to_node))
 
-    graph = _digraph_from_iter((Edge(node_to_idx[src_name], node_to_idx[dst_name]) for (src_name, dst_name) in edges), idx_to_node)
+    graph = _digraph_from_iter(
+        extended_idx_edge_itr(input, output, subcomponents, edges, node_to_idx),
+        idx_to_node
+    )
 
     CompositeComponent(input, output, subcomponents, node_to_idx, idx_to_node, graph, abstract)
 end
@@ -195,9 +243,6 @@ function implement(c::CompositeComponent, t::Target,
     # with the `CompIn` and `CompOut` from the subcomponents
     new_in, new_out = implement_inputs_and_outputs(c, new_comps, input_filter, output_filter, t, deep)
 
-    # new_in = implement(inputs(c), t, input_filter; deep)
-    # new_out = implement(outputs(c), t, output_filter; deep)
-
     new_idx_to_node = collect(Iterators.flatten((
         (Input(k) for k in keys_deep(new_in)), (Output(k) for k in keys_deep(new_out)),
         (CompIn(compname, inname) for (compname, subcomp) in pairs(new_comps) for inname in keys_deep(inputs(subcomp))),
@@ -205,13 +250,16 @@ function implement(c::CompositeComponent, t::Target,
     )))
     new_node_to_idx = Dict{NodeName, UInt}(name => idx for (idx, name) in enumerate(new_idx_to_node))
 
-    new_graph = _digraph_from_iter(Iterators.map(
-        ((src, dst),) -> Edge(new_node_to_idx[src], new_node_to_idx[dst]),
-        Iterators.flatten(
-            expand_edges(edge, new_in, new_out, new_comps, c)
-            for edge in get_edges(c)
-        )
-    ), new_idx_to_node)
+    new_graph = _digraph_from_iter(
+        idx_edge_itr( # TODO: do we want `extended_idx_edge_itr` instead?
+            Iterators.flatten(
+                expand_edges(edge, new_in, new_out, new_comps, c)
+                for edge in get_edges(c)
+            ),
+            new_node_to_idx
+        ),
+        new_idx_to_node
+    )
 
     return CompositeComponent(new_in, new_out, new_comps, new_node_to_idx, new_idx_to_node, new_graph, c)
 end

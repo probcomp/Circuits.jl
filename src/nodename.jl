@@ -112,12 +112,12 @@ valname(v::Union{Input, Output}) = v.id
 valname(v::CompIn) = v.in_name
 valname(v::CompOut) = v.out_name
 
-# """
-#     append_to_valname(n::NodeName, rest)
+"""
+    append_to_valname(n::NodeName, rest)
 
-# Returns a new nodename which is like the first, but with `rest` nested at the end of the value's name.
-# """
-# append_to_valname(i::Input, rest) = Input(nest(valname(i), rest))
-# append_to_valname(o::Output, rest) = Output(nest(valname(i), rest))
-# append_to_valname(i::CompIn, rest) = CompIn(i.comp_name, nest(valname(i), rest))
-# append_to_valname(i::CompOut, rest) = CompOut(i.comp_name, nest(valname(i), rest))
+Returns a new nodename which is like the first, but with `rest` nested at the end of the value's name.
+"""
+append_to_valname(i::Input, rest) = Input(nest(valname(i), rest))
+append_to_valname(o::Output, rest) = Output(nest(valname(o), rest))
+append_to_valname(i::CompIn, rest) = CompIn(i.comp_name, nest(valname(i), rest))
+append_to_valname(o::CompOut, rest) = CompOut(o.comp_name, nest(valname(o), rest))
