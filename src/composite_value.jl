@@ -18,6 +18,11 @@ one may use `v[x1 => (x2 => ... => (x_n))]`, which equals `v[x1][x2][...][x_n]`.
 struct CompositeValue <: Value# {T} <: Value
     vals #::T
     abstract::Union{Value, Nothing}
+    function CompositeValue(v, abst)
+        @assert v isa Tuple || v isa NamedTuple "CompositeValue should wrap a Tuple or NamedTuple of values"
+        @assert all(x isa Value for x in v) "When constructing a CompositeValue, not all given sub-values were actually values!  The following non-values were given: $([x for x in v if !isa(x, Value)])"
+        return new(v, abst)
+    end
     # CompositeValue(v::T, abst=nothing) where {T <: tup_or_namedtup(Value)} = new{basetype(T)}(v, abst)
     # CompositeValue(v::T, args...) where {T <: Tuple{Vararg{<:Value}}} = new{Tuple}(vals, args...)
     # CompositeValue(v::T, args...) where {T <: NamedTuple{<:Any, <:Tuple{Vararg{<:Value}}}} = new{NamedTuple}(vals, args...)
