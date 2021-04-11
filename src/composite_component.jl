@@ -32,13 +32,14 @@ struct CompositeComponent <: Component #{InID, OutID, SC} <: Component
 end
 CompositeComponent(i, o, sc, ni, in, g) = new(i, o, sc, ni, in, g, nothing)
 
-function _digraph_from_iter(itr, idx_to_node)
+function _digraph_from_iter(itr, idx_to_node; identifier_info="")
     graph = try
         SimpleDiGraphFromIterator(itr)
     catch e
         if e isa KeyError && e.key isa NodeName
-            @error("$(e.key) used in `edges` but does not match the nodenames derived from `input`, `output`, and `subcomponents`")
-            display(collect(values(idx_to_node)))
+            @error("$(e.key) used in `edges` but does not match the nodenames derived from `input`, `output`, and `subcomponents`", exception = (e, catch_backtrace()))
+        else
+            @error("An error occurred while constructing a CompositeComponent (possibly due to expanding the edge iterator!).  ($identifier_info)", exception = (e, catch_backtrace()))
         end
         throw(e)
     end
@@ -64,17 +65,24 @@ function expand_edge(src::NodeName, dst::NodeName, input, output, subcomponents,
 end
 
 """
-    name_extensions(n::NodeName, c::CompositeComponnet)
+    name_extensions(n::NodeName, input, output, subcomponents)
 
 Given a nodename `n` where `v = valname(n)`, this returns an iterator over all the extensions to `v`
 so that the resulting value-name is a deep index into a node in `c`.
 
 (In other words, finds all remainders `r` such that `append_to_valname(v, r)` is a deep nodename in `c`.)
 """
-name_extensions(v::Input, input, _, _) = _name_extensions(input, v)
-name_extensions(v::Output, _, output, _) = _name_extensions(output, v)
-name_extensions(v::CompIn, _, _, subcomponents) = _name_extensions(inputs(subcomponents[v.comp_name]), v)
-name_extensions(v::CompOut, _, _, subcomponents) = _name_extensions(outputs(subcomponents[v.comp_name]), v)
+name_extensions(n::NodeName, input, output, subcomponents) =
+    try
+       __name_extensions(n, input, output, subcomponents)
+    catch e
+        @error("Error occurred while looking for name extensions for $n.", exception=(e, catch_backtrace()))
+        throw(e)
+    end
+__name_extensions(v::Input, input, _, _) = _name_extensions(input, v)
+__name_extensions(v::Output, _, output, _) = _name_extensions(output, v)
+__name_extensions(v::CompIn, _, _, subcomponents) = _name_extensions(inputs(subcomponents[v.comp_name]), v)
+__name_extensions(v::CompOut, _, _, subcomponents) = _name_extensions(outputs(subcomponents[v.comp_name]), v)
 _name_extensions(val, v) = keys_deep(val[valname(v)])
 
 extended_idx_edge_itr(input, output, subcomponents, edges, node_to_idx) = idx_edge_itr(
@@ -119,7 +127,8 @@ function CompositeComponent(
 
     graph = _digraph_from_iter(
         extended_idx_edge_itr(input, output, subcomponents, edges, node_to_idx),
-        idx_to_node
+        idx_to_node;
+        identifier_info="CompositeComponent had abstract type = $(typeof(abstract))."
     )
 
     CompositeComponent(input, output, subcomponents, node_to_idx, idx_to_node, graph, abstract)
@@ -258,7 +267,8 @@ function implement(c::CompositeComponent, t::Target,
             ),
             new_node_to_idx
         ),
-        new_idx_to_node
+        new_idx_to_node;
+        identifier_info="Occurred during implementation of component with abstract type $(typeof(abstract(c)))."
     )
 
     return CompositeComponent(new_in, new_out, new_comps, new_node_to_idx, new_idx_to_node, new_graph, c)
@@ -289,10 +299,11 @@ function implement_inputs_and_outputs(c, new_comps, input_filter, output_filter,
             @assert all(inval(compin) == val for compin in input_connections[Input(key)]) "Implementing this CompositeComponent leads to `CompIn`s which are connected to the same output being implemented at different levels!"
             implement_to(key, inputs(c)[key], val, target)
         else
-            if input_filter(key)
-                (deep ? implement_deep : implement)(inputs(c)[key], target)
+            val = inputs(c)[key] 
+            if !(val isa PrimitiveValue) && input_filter(key)
+                (deep ? implement_deep : implement)(val, target)
             else
-                inputs(c)[key]
+                val
             end
         end
     get_new_output(key) =
@@ -301,10 +312,11 @@ function implement_inputs_and_outputs(c, new_comps, input_filter, output_filter,
             @assert all(outval(compout) == val for compout in output_connections[Output(key)]) "Implementing this CompositeComponent leads to `CompOut`s which are connected to the same output being implemented at different levels!"
             implement_to(key, outputs(c)[key], val, target)
         else
-            if output_filter(key)
-                (deep ? implement_deep : implement)(outputs(c)[key], target; deep)
+            val = outputs(c)[key]
+            if !(val isa PrimitiveValue) && output_filter(key)
+                (deep ? implement_deep : implement)(val, target; deep)
             else
-                outputs(c)[key]
+                val
             end
         end
 
@@ -358,7 +370,7 @@ the more general `implement(::CompositeComponent, ...)` with name filtering.
 implement(c::CompositeComponent, t::Target, subcomp_names...; kwargs...) =
     implement(c, t, in(subcomp_names); kwargs...)
 
-implement_deep(c, t::Target, subcomp_names...; kwargs...) =
+implement_deep(c::CompositeComponent, t::Target, subcomp_names...; kwargs...) =
     implement(c, t, subcomp_names...; deep=true)
 
 """
