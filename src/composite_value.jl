@@ -154,3 +154,29 @@ function NestedCompositeValue(itr)
         error("unexpected key: $k")
     end
 end
+
+function merge_composite_values(a::CompositeValue, b::CompositeValue)
+    if a.vals isa NamedTuple
+        @assert b.vals isa NamedTuple "Cannot merge int-indexed and symbol-indexed composite values"
+        return CompositeValue((;Iterators.flatten((
+            (
+                key => merge_composite_values(a[key], b[key])
+                for key in intersect(keys(a.vals), keys(b.vals))
+            ),
+            ( key => a[key] for key in setdiff(keys(a.vals), keys(b.vals)) ),
+            ( key => b[key] for key in setdiff(keys(b.vals), keys(a.vals)) )
+        ))...))
+    else
+        @assert a.vals isa Tuple && b.vals isa Tuple
+        minlen = min(length(a.vals), min(length(b.vals)))
+        longer = length(a.vals) > length(b.vals) ? a : b
+        return CompositeValue(Tuple(
+            if i <= minlen
+                merge_composite_values(a[i], b[i])
+            else
+                longer[i]
+            end
+            for i=1:length(longer)
+        ))
+    end
+end
