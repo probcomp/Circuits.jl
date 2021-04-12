@@ -143,3 +143,70 @@ A `ComponentGroup` with subcomponent named via keys given keys, given a `subcomp
 iterator over `(key::Symbol, subcomponent)` pairs.
 """
 NamedComponentGroup(n) = ComponentGroup(NamedTuple(n))
+
+"""
+    WithAbstractComponent <: GenericComponent
+    WithAbstractComponent(component::Component, abstract::Component)
+    WithAbstract(component::Component, abstract::Component)
+
+A component implemented in the same way as `component`, but with a different `abstract` form.
+(Useful for implementing one component as another.)
+"""
+struct WithAbstractComponent <: GenericComponent
+    component::Component
+    abstract::Component
+end
+WithAbstract(c::Component, a::Component) = WithAbstractComponent(c, a)
+# TODO: I forget the minimal amount I need to implement; this may be overkill
+abstract(c::WithAbstractComponent) = c.abstract
+target(c::WithAbstractComponent) = target(c.component)
+inputs(c::WithAbstractComponent) = inputs(c.component)
+outputs(c::WithAbstractComponent) = outputs(c.component)
+implement(c::WithAbstractComponent, t::Target) = implement(c.component, t)
+is_implementation_for(c::WithAbstractComponent, t::Target) = is_implementation_for(c.component, t)
+
+"""
+    RelabeledIOComponent(component::Component, input_relabels, output_relabels, abstact::Union{Component, Nothing})
+
+Wraps `component` to reroute inputs according to `input_relabels` and outputs according to `output_relabels`.
+Each relabels arg should be an iterator over pairs `old_name => new_name` describing the input/output
+to be relabeled.  All these names should be symbols; we do not currently support relabeling integer-indexed input or output values.
+If given an `abstract`, takes `abstract` to be the abstract version of this component.
+"""
+struct RelabeledIOComponent
+    component::Component
+    input_relabels::Dict
+    output_relabels::Dict
+    abstract::Union{Nothing, Component}
+end
+RelabeledIOComponent(c, i, o, a=nothing) = RelabeledIOComponent(Dict(c...), Dict(i...), Dict(o...), a)
+relabeled_key(k, relabels) = get(relabels, k, k)
+function Circuits.inputs(c::RelabeledIOComponent)
+    @assert inputs(c).vals isa NamedTuple || isempty(c.input_relabels) "Current implementation can only relabel symbol (not Int)-addressed values"
+    return CompositeValue((;(
+        relabeled_key(k, c.input_relabels) => v for (k, v) in pairs(inputs(c).vals)
+    )...))
+end
+function outputs(c::RelabeledIOComponent)
+    @assert inputs(c).vals isa NamedTuple || isempty(c.output_relabels) "Current implementation can only relabel symbol (not Int)-addressed values"
+    return CompositeValue((;(
+        relabeled_key(k, c.output_relabels) => v for (k, v) in pairs(inputs(c).vals)
+    )...))
+end
+implement(c::RelabeledIOComponent) = CompositeComponent(
+    inputs(c), outputs(c),
+    (component=c.component),
+    Iterators.flatten((
+        (
+            Input(relabeled_key(k, c.input_relabels)) => CompIn(:component, k)
+            for k in keys(inputs(c.component))
+        ),
+        (
+            CompOut(:component, k) => Output(relabeled_key(k, c.output_relabels))
+            for k in keys(output(c.component))
+        )
+    )),
+    c
+)
+abstract(c::RelabeledIOComponent) = c.abstract
+target(c::RelabeledIOComponent) = target(c.component)

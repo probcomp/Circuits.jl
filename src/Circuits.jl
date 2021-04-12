@@ -27,6 +27,7 @@ export abstract, target, inputs, outputs, implement, implement_deep, is_implemen
 export keys_deep, length_deep
 export IndexedValues, NamedValues
 export ComponentGroup, IndexedComponentGroup, NamedComponentGroup
+export WithAbstractComponent, WithAbstract, RelabeledIOComponent
 export NodeName, Input, Output, CompIn, CompOut
 export Binary
 export can_implement, compiles_to_binary
