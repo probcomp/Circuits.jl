@@ -406,3 +406,54 @@ receivers(c::CompositeComponent, name::Union{Input, Output, CompOut}) = _receive
 _receivers(c::CompositeComponent, name::NodeName) = (
         c.idx_to_node[idx] for idx in outneighbors(c.graph, c.node_to_idx[name])
     )
+
+"""
+    inputters(c::CompositeComponent: name::NodeName)
+
+Iterator over all the `NodeName`s which send an input to the node named `name`.
+
+(If the component is valid, each element of the outputted iterator
+will either be an `Input`, `Output` or `CompOut`.)
+"""
+
+inputters(c::CompositeComponent, name::Union{Input, Output, CompIn}) = _inputters(c, name)
+function inputters(c::CompositeComponent, name::CompOut)
+    i = _inputters(c, name)
+    @assert isempty(i)
+    i
+end
+_inputters(c::CompositeComponent, name::NodeName) = (
+    c.idx_to_node[idx] for idx in inneighbors(c.graph, c.node_to_idx[name])
+)
+
+"""
+    topologically_ordered_subcomponents(c::CompositeComponent)
+
+If `c` is acyclic, an iterator over (name, subcomponent) pairs, in topological order.
+If `c` is cyclic, returns `nothing`.
+"""
+topologically_ordered_subcomponents(c::CompositeComponent) = 
+    let (nodegraph, idx_to_name, name_to_idx) = _subcomponent_graph(c)
+        if is_cyclic(nodegraph)
+            nothing
+        else
+            (idx_to_name[idx] for idx in LightGraphs.topological_sort_by_dfs(nodegraph))
+        end
+    end
+
+"""
+Return a graph on the subcomponents of the composite component (rather
+than on the NodeNames).
+"""
+# This is currently not an externally-facing function, but we could make it one.
+function _subcomponent_graph(c::CompositeComponent)
+    idx_to_name = collect(keys(c.subcomponents))
+    name_to_idx = Dict(n => i for (i, n) in enumerate(idx_to_name))
+    graph = SimpleDiGraph(length(idx_to_name))
+    for (inname, outname) in get_edges(c)
+        if inname isa CompOut && outname isa CompIn
+            add_edge!(graph, Edge(name_to_idx[inname.comp_name], name_to_idx[outname.comp_name]))
+        end
+    end
+    return (graph, idx_to_name, name_to_idx)
+end

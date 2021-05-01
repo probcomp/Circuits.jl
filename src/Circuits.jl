@@ -32,5 +32,7 @@ export NodeName, Input, Output, CompIn, CompOut
 export Binary
 export can_implement, compiles_to_binary
 export merge_composite_values
+export inputters, receivers
+export topologically_ordered_subcomponents
 
 end
