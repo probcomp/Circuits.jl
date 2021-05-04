@@ -173,29 +173,29 @@ Each relabels arg should be an iterator over pairs `old_name => new_name` descri
 to be relabeled.  All these names should be symbols; we do not currently support relabeling integer-indexed input or output values.
 If given an `abstract`, takes `abstract` to be the abstract version of this component.
 """
-struct RelabeledIOComponent
+struct RelabeledIOComponent <: GenericComponent
     component::Component
     input_relabels::Dict
     output_relabels::Dict
     abstract::Union{Nothing, Component}
+    RelabeledIOComponent(c, i, o, a=nothing) = new(c, Dict(i...), Dict(o...), a)
 end
-RelabeledIOComponent(c, i, o, a=nothing) = RelabeledIOComponent(Dict(c...), Dict(i...), Dict(o...), a)
 relabeled_key(k, relabels) = get(relabels, k, k)
 function Circuits.inputs(c::RelabeledIOComponent)
-    @assert inputs(c).vals isa NamedTuple || isempty(c.input_relabels) "Current implementation can only relabel symbol (not Int)-addressed values"
+    @assert inputs(c.component).vals isa NamedTuple || isempty(c.input_relabels) "Current implementation can only relabel symbol (not Int)-addressed values"
     return CompositeValue((;(
-        relabeled_key(k, c.input_relabels) => v for (k, v) in pairs(inputs(c).vals)
+        relabeled_key(k, c.input_relabels) => v for (k, v) in pairs(inputs(c.component).vals)
     )...))
 end
 function outputs(c::RelabeledIOComponent)
-    @assert inputs(c).vals isa NamedTuple || isempty(c.output_relabels) "Current implementation can only relabel symbol (not Int)-addressed values"
+    @assert outputs(c.component).vals isa NamedTuple || isempty(c.output_relabels) "Current implementation can only relabel symbol (not Int)-addressed values"
     return CompositeValue((;(
-        relabeled_key(k, c.output_relabels) => v for (k, v) in pairs(inputs(c).vals)
+        relabeled_key(k, c.output_relabels) => v for (k, v) in pairs(outputs(c.component).vals)
     )...))
 end
-implement(c::RelabeledIOComponent) = CompositeComponent(
+implement(c::RelabeledIOComponent, ::Target) = CompositeComponent(
     inputs(c), outputs(c),
-    (component=c.component),
+    (component=c.component,),
     Iterators.flatten((
         (
             Input(relabeled_key(k, c.input_relabels)) => CompIn(:component, k)
@@ -203,7 +203,7 @@ implement(c::RelabeledIOComponent) = CompositeComponent(
         ),
         (
             CompOut(:component, k) => Output(relabeled_key(k, c.output_relabels))
-            for k in keys(output(c.component))
+            for k in keys(outputs(c.component))
         )
     )),
     c

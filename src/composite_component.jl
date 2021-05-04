@@ -51,7 +51,7 @@ end
 function expand_edge(src::NodeName, dst::NodeName, input, output, subcomponents, node_to_idx)
     if src in keys(node_to_idx)
         # no expansion necessary
-        @assert dst in keys(node_to_idx)
+        @assert dst in keys(node_to_idx) "$dst not a known output nodename"
         return (src => dst,)
     else
         src_ext = name_extensions(src, input, output, subcomponents)
@@ -437,7 +437,12 @@ topologically_ordered_subcomponents(c::CompositeComponent) =
         if is_cyclic(nodegraph)
             nothing
         else
-            (idx_to_name[idx] for idx in LightGraphs.topological_sort_by_dfs(nodegraph))
+            (
+                let name = idx_to_name[idx]
+                    (name, c.subcomponents[name])
+                end
+                for idx in LightGraphs.topological_sort_by_dfs(nodegraph)
+            )
         end
     end
 
