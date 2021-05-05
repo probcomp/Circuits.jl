@@ -20,6 +20,28 @@ Whether the given component/value can be implemented in this target.
 """
 can_implement(::K, ::T) where {K <: Union{Component, Value}, T <: Target} = hasmethod(implement, Tuple{K, T})
 
+"""
+    has_abstact_of_type(value::Value, type::Type)
+    has_abstact_of_type(component::Component, type::Type)
+
+Whether some abstract version of the value/component is of type `type`.
+(This checks `abstract(item)`, `abstract(abstract(item))`, and so on.)
+"""
+has_abstract_of_type(item::Union{Value, Component}, type::Type) =
+    isa(item, type) || has_abstract_of_type(abstract(item), type)
+has_abstract_of_type(::Nothing, t::Type) = t == Nothing
+
+"""
+    abstract_to_type(value::Value, type::Type)
+    abstract_to_type(component::Component, type::Type)
+
+Abstract the value or component until reaching an abstract version of type `type`;
+return nothing if no abstract version of this type exists.
+"""
+abstract_to_type(item::T, ::Type{T}) where {T <: Union{Value, Component}} = item
+abstract_to_type(item::Union{Value, Component}, t::Type) = abstract_to_type(abstract(item), t)
+abstract_to_type(::Nothing, ::Type) = nothing
+
 export Target
 export Value, PrimitiveValue, GenericValue, CompositeValue
 export Component, PrimitiveComponent, GenericComponent, CompositeComponent
@@ -34,5 +56,6 @@ export can_implement, compiles_to_binary
 export merge_composite_values
 export inputters, receivers
 export topologically_ordered_subcomponents
+export has_abstract_of_type, abstract_to_type
 
 end
