@@ -314,7 +314,7 @@ function implement_inputs_and_outputs(c, new_comps, input_filter, output_filter,
             # TODO: there are situations where this check doesn't work very well, if we have deep-implemented
             # a subcomponent where the intermediary transformations of the values are non-standard.
             if !(has_abstract(val, inputs(c)[key]) || can_implement_to(inputs(c)[key], val, target))
-                @error """
+                @warn """
                     While implementing a CompositeComponent [with abstract type $(typeof(abstract(c)))],
                     we need to connect value $val at key $key to $(inputs(c)[key]), but the latter is not an abstract
                     version of the first, nor can the first be implemented into the second!
@@ -334,7 +334,7 @@ function implement_inputs_and_outputs(c, new_comps, input_filter, output_filter,
             val = outval(first(output_connections[Output(key)]))
             @assert all(outval(compout) == val for compout in output_connections[Output(key)]) "Implementing this CompositeComponent leads to `CompOut`s which are connected to the same output being implemented at different levels!"
             if !(has_abstract(val, outputs(c)[key]) || can_implement_to(outputs(c)[key], val, target))
-                @error """
+                @warn """
                 While implementing a CompositeComponent [with abstract type $(typeof(abstract(c)))],
                 we need to connect value $val at key $key to $(outputs(c)[key]), but the latter is not an abstract
                 version of the first, nor can the first be implemented into the second for target $(target)!
