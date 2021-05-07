@@ -89,7 +89,17 @@ keys_deep(v::CompositeValue) = Iterators.flatten((
 
 abstract(v::CompositeValue) = v.abstract
 
-Base.getindex(cv::CompositeValue, k) = cv.vals[k]
+function Base.getindex(cv::CompositeValue, k)
+    if k isa Int && cv.vals isa NamedTuple
+        error("Attempt to int-index into a named Composite Value.  (Value: $cv ; index: $k.)")
+    end
+    try
+        cv.vals[k]
+    catch e
+        @error("Error while looking up `$k` in `$cv`.", exception=(e, catch_backtrace()))
+        error()
+    end
+end
 Base.getindex(cv::CompositeValue, p::Pair) = cv.vals[p.first][p.second]
 
 is_implementation_for(v::CompositeValue, t::Target) = all(is_implementation_for(val, t) for val in values(v))

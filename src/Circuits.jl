@@ -32,6 +32,17 @@ has_abstract_of_type(item::Union{Value, Component}, type::Type) =
 has_abstract_of_type(::Nothing, t::Type) = t == Nothing
 
 """
+    has_abstract(::Value, abstract)
+    has_abstract(::Component, abstract)
+
+Whether some sufficiently abstract version of the given Value/Component
+is equal to `abstract` (equality checked via `==`).
+"""
+has_abstract(item::Union{Value, Component}, abst) =
+    item == abst || has_abstract(abstract(item), abst)
+has_abstract(n::Nothing, a) = n == a
+
+"""
     abstract_to_type(value::Value, type::Type)
     abstract_to_type(component::Component, type::Type)
 
