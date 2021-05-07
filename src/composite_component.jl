@@ -291,13 +291,36 @@ function implement_inputs_and_outputs(c, new_comps, input_filter, output_filter,
     # implement the values to the correct thing
     # (we implement to this rather than just using the CompIn/CompOut value so that we can error check
     # in case this implementation is impossible)
-    inval(compin) = inputs(new_comps[compin.comp_name])[valname(compin)]
-    outval(compout) = outputs(new_comps[compout.comp_name])[valname(compout)]
+    inval(compin) =
+        try
+            inputs(new_comps[compin.comp_name])[valname(compin)]
+        catch e
+            @error("Error while looking up input `$(valname(compin))` in new component $(compin.comp_name).", exception=(e, catch_backtrace()))
+            error()
+        end
+
+    outval(compout) = 
+        try
+            outputs(new_comps[compout.comp_name])[valname(compout)]
+        catch e
+            @error("Error while looking up output `$(valname(compout))` in new component $(compout.comp_name).", exception=(e, catch_backtrace()))
+            error()
+        end
+
     get_new_input(key) =
         if haskey(input_connections, Input(key))
             val = inval(first(input_connections[Input(key)]))
             @assert all(inval(compin) == val for compin in input_connections[Input(key)]) "Implementing this CompositeComponent leads to `CompIn`s which are connected to the same output being implemented at different levels!"
-            implement_to(key, inputs(c)[key], val, target)
+            # TODO: there are situations where this check doesn't work very well, if we have deep-implemented
+            # a subcomponent where the intermediary transformations of the values are non-standard.
+            if !(has_abstract(val, inputs(c)[key]) || can_implement_to(inputs(c)[key], val, target))
+                @error """
+                    While implementing a CompositeComponent [with abstract type $(typeof(abstract(c)))],
+                    we need to connect value $val at key $key to $(inputs(c)[key]), but the latter is not an abstract
+                    version of the first, nor can the first be implemented into the second!
+                """
+            end
+            val
         else
             val = inputs(c)[key] 
             if !(val isa PrimitiveValue) && input_filter(key)
@@ -310,11 +333,18 @@ function implement_inputs_and_outputs(c, new_comps, input_filter, output_filter,
         if haskey(output_connections, Output(key))
             val = outval(first(output_connections[Output(key)]))
             @assert all(outval(compout) == val for compout in output_connections[Output(key)]) "Implementing this CompositeComponent leads to `CompOut`s which are connected to the same output being implemented at different levels!"
-            implement_to(key, outputs(c)[key], val, target)
+            if !(has_abstract(val, outputs(c)[key]) || can_implement_to(outputs(c)[key], val, target))
+                @error """
+                While implementing a CompositeComponent [with abstract type $(typeof(abstract(c)))],
+                we need to connect value $val at key $key to $(outputs(c)[key]), but the latter is not an abstract
+                version of the first, nor can the first be implemented into the second for target $(target)!
+                """
+            end
+            val
         else
             val = outputs(c)[key]
             if !(val isa PrimitiveValue) && output_filter(key)
-                (deep ? implement_deep : implement)(val, target; deep)
+                (deep ? implement_deep : implement)(val, target)
             else
                 val
             end
@@ -327,18 +357,13 @@ function implement_inputs_and_outputs(c, new_comps, input_filter, output_filter,
     )
 end
 
-function implement_to(key, val, goal, target)
-    val1 = val
+can_implement_to(val, goal, target) =
     try
-        while val != goal
-            val = implement(val, target)
-        end
-    catch e
-        @error("While implementing a CompositeComponent, to implement $key to match a subcomponent output/input, we have to implement $val to become $goal, which does not occur.")
-        error(e)
+        implemented = implement(val, target)
+        implemented == goal || can_implement_to(implemented, goal, target)
+    catch
+        return false
     end
-    return val
-end
 
 function expand_edges((src, dst), new_in, new_out, new_comps, c)
     src_wrapper, src_val = get_val(src, new_in, new_out, new_comps)
