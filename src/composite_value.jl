@@ -39,12 +39,26 @@ given by iterating through `t`.
 IndexedValues(t, abstract=nothing) = CompositeValue(Tuple(t), abstract)
 
 """
-    NamedValues(t...)
+    NamedValues(t...; abstract=nothing)
 
 Given a vararg `t` of `(name::Symbol, value::Value)` pairs,
 a `CompositeValue` with the given values at the given names.
 """
-NamedValues(t...) = CompositeValue((;t...))
+NamedValues(t...; abstract=nothing) = CompositeValue((;t...), abstract)
+
+# TODO: document
+NamedOrIndexedValues(itr, abstract=nothing) =
+    if isempty(itr)
+        CompositeValue((), abstract)
+    else
+        if first(itr).first isa Symbol
+            @assert all(p.first isa Symbol for p in itr)
+            NamedValues(itr...; abstract)
+        else
+            @assert all(p.first == i for (i, p) in enumerate(itr))
+            IndexedValues((p.second for p in itr), abstract)
+        end
+    end
 
 Base.pairs(v::CompositeValue) = Base.pairs(v.vals)
 Base.keys(v::CompositeValue) = Base.keys(v.vals)
