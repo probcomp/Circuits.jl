@@ -97,21 +97,29 @@ implement_deep(c::PrimitiveComponent{T1}, t::T2) where {T1 <: Target, T2 <: Targ
 implement_deep(c::GenericComponent, t::Target) = implement_deep(implement(c, t), t)
 
 # Memoized implement methods:
-@memoize memoized_implement(c::Component, t::Target) =
-    if c isa CompositeComponent
+@memoize function memoized_implement(c::Component, t::Target)
+    println("Implementing component of type $(typeof(c))...")
+    impl = if c isa CompositeComponent
         implement(c, t; deep=false, memoize=true)
     else
         implement(c, t)
     end
+    println("Finished implementing component of type $(typeof(c)).")
+    return impl
+end
 
-@memoize memoized_implement_deep(c::Component, t::Target) =
-    if c isa PrimitiveComponent
+@memoize function memoized_implement_deep(c::Component, t::Target)
+    println("Deep implementing component of type $(typeof(c))...")
+    impl = if c isa PrimitiveComponent
         implement_deep(c, t)
     elseif c isa CompositeComponent
         implement(c, t; deep=true, memoize=true)
     elseif c isa GenericComponent
         memoized_implement_deep(memoized_implement(c, t), t)
     end
+    println("Finished deep implementing a component of type $(typeof(c)).")
+    return impl
+end
 
 ### CompositeComponent ###
 
