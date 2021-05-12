@@ -1,6 +1,7 @@
 module Circuits
 
 using Distributions: Categorical, ncategories, probs
+using Memoization
 
 # returns a collection of the same top-level type mapping `name => name`
 names(t::Tuple) = Tuple(1:length(t))

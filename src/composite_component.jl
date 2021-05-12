@@ -210,6 +210,17 @@ is_implementation_for(c::CompositeComponent, t::Target) =
         is_implementation_for(subc, t) for subc in values(c.subcomponents)
     )
 
+implement_fn(deep::Bool, memoized::Bool) =
+    if deep && memoized
+        memoized_implement_deep
+    elseif deep && !memoized
+        implement_deep
+    elseif !deep && memoized
+        memoized_implement
+    else
+        implement
+    end
+
 """
     implement(c::CompositeComponent, t::Target,
         subcomponent_filter::Function = (n -> true);
@@ -232,17 +243,14 @@ function implement(c::CompositeComponent, t::Target,
     subcomponent_filter::Function = (n -> true);
     input_filter::Function = (n -> true),
     output_filter::Function = (n -> true),
-    deep=false
+    deep=false,
+    memoize=false
 )
     # TODO: be smarter about which subcomponents we implement, so that we don't
     # end up connecting values implemented to different levels
     new_comps = map(names(c.subcomponents), c.subcomponents) do name, subcomp
         if subcomponent_filter(name)
-            if deep
-                implement_deep(subcomp, t)
-            else
-                implement(subcomp, t)
-            end
+            implement_fn(deep, memoize)(subcomp, t)
         else
             subcomp
         end
