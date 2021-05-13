@@ -66,6 +66,12 @@ Base.values(v::CompositeValue) = Base.values(v.vals)
 Base.length(v::CompositeValue) = Base.length(v.vals)
 Base.:(==)(a::CompositeValue, b::CompositeValue) = a.vals == b.vals
 Base.hash(a::CompositeValue, h::UInt) = hash(a.vals, h)
+Base.haskey(v::CompositeValue, key) =
+    if v.vals isa NamedTuple
+        haskey(v.vals, key)
+    else
+        key isa Integer && 1 ≤ key ≤ length(v.vals)
+    end
 
 """
     Base.map(f, v::CompositeValue)
