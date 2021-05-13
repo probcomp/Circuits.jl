@@ -56,7 +56,7 @@ function expand_edge(src::NodeName, dst::NodeName, input, output, subcomponents,
     else
         src_ext = name_extensions(src, input, output, subcomponents)
         dst_ext = name_extensions(dst, input, output, subcomponents)
-        @assert Set(src_ext) == Set(dst_ext)
+        @assert Set(src_ext) == Set(dst_ext) "Name extensions did not match for src = $src, dst = $dst"
         return (
             append_to_valname(src, ext) => append_to_valname(dst, ext)
             for ext in src_ext
