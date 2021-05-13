@@ -139,6 +139,8 @@ and keys if `subcomponents` is a `NamedTuple`.
 """
 struct ComponentGroup{T} <: GenericComponent
     subcomponents::T
+    ComponentGroup(subcomponents::Tuple) = new{Tuple}(subcomponents)
+    ComponentGroup(subcomponents::NamedTuple) = new{NamedTuple}(subcomponents)
 end
 inputs(c::ComponentGroup) = CompositeValue(map(inputs, c.subcomponents))
 outputs(c::ComponentGroup) = CompositeValue(map(outputs, c.subcomponents))
