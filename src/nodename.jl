@@ -96,6 +96,7 @@ CompOut(p::Pair, outname) = CompOut(p.first, nest(p.second, outname))
 
 nest(p, v) = p => v
 nest(p::Pair, v) = p.first => nest(p.second, v)
+nest(::Nothing, v) = v
 
 Base.:(==)(a::CompIn, b::CompIn) = (a.comp_name == b.comp_name && a.in_name == b.in_name)
 Base.:(==)(a::CompOut, b::CompOut) = (a.comp_name == b.comp_name && a.out_name == b.out_name)
