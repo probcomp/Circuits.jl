@@ -70,4 +70,7 @@ export inputters, receivers
 export topologically_ordered_subcomponents
 export has_abstract_of_type, abstract_to_type
 
+include("flatten.jl")
+export flatten
+
 end

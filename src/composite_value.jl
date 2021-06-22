@@ -19,7 +19,6 @@ struct CompositeValue <: Value# {T} <: Value
     vals #::T
     abstract::Union{Value, Nothing}
     function CompositeValue(v, abst)
-        @assert v isa Tuple || v isa NamedTuple "CompositeValue should wrap a Tuple or NamedTuple of values"
         @assert all(x isa Value for x in v) "When constructing a CompositeValue, not all given sub-values were actually values!  The following non-values were given: $([x for x in v if !isa(x, Value)])"
         return new(v, abst)
     end
