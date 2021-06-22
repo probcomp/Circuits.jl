@@ -4,7 +4,8 @@ using Distributions: Categorical, ncategories, probs
 using Memoization
 
 # returns a collection of the same top-level type mapping `name => name`
-names(t::Tuple) = Tuple(1:length(t))
+names(t::Vector)     = Tuple(1:length(t))
+names(t::Tuple)      = Tuple(1:length(t))
 names(n::NamedTuple) = (;(k=>k for k in keys(n))...)
 
 no_impl_error(::V, ::T) where {V, T} = error("No implementation for type `$V` defined for target `$T`.")

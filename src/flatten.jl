@@ -124,13 +124,20 @@ function new_names(dest::CompOut,
     end
     return Iterators.flatten(indexed)
 end
+    
+function flat_subsub(v)
+    if v isa CompositeComponent
+        return v.subcomponents
+    else
+        return (v, )
+    end
+end
 
 function _flatten(c::CompositeComponent)
     flt_subs_and_mappings = map(_flatten, c.subcomponents)
     flt_subs = map(first, flt_subs_and_mappings)
     subcomp_mappings = map(second, flt_subs_and_mappings)
     # each element of subcomp_mappings is `input_map, output_map` giving the name
-    # maps for a subcomponent
     idx_to_in = inputs(c) |> keys_deep |> collect
     idx_to_out = outputs(c) |> keys_deep |> collect
     in_to_idx = Dict(v => k for (k, v) in enumerate(idx_to_in))
@@ -168,10 +175,10 @@ function _flatten(c::CompositeComponent)
         end
     end
     new_comp = CompositeComponent(
-            IndexedValues([inputs(c)[name] for name in idx_to_in]),
-            IndexedValues([outputs(c)[name] for name in idx_to_out]),
-            flt_subs,
-            new_edges)
+                                  IndexedValues([inputs(c)[name] for name in idx_to_in]),
+                                  IndexedValues([outputs(c)[name] for name in idx_to_out]),
+                                  Iterators.flatten(flat_subsub(v) for v in flt_subs) |> collect,
+                                  new_edges)
     return (new_comp, in_to_idx, out_to_idx)
 end
 
