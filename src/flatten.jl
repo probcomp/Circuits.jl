@@ -27,20 +27,19 @@
 # - receivers: for a `NodeName` name, iterator over all other `NodeName` instance which receive
 # from name.
 
-# TODO:
-# 1. Test case: simple one (no recurrence)
-# 2. Test case: simple recurrence.
-# 3. Test case: explicit passthrough in subcomponent.
-# 4. Test case: passthrough which then recurs.
-#         - (goes back in for a finite number of cycles).
-#
-# TODO: also output some data structure which lets us lookup
-# the nested name for a neuron before flattening.
+# Defines "leaves" for `Base.iterate`.
+# I suspect this is required for Iterators.flatten
+# to work correctly.
+import Base: iterate
+Base.iterate(inp::Input) = (inp, nothing)
+Base.iterate(inp::Input, n::Nothing) = n
+Base.iterate(out::Output) = (out, nothing)
+Base.iterate(out::Output, n::Nothing) = n
 
 second(t::Tuple) = t[2 : end]
 
 # Leaf.
-function flatten(c)
+function _flatten(c)
     idx_to_in = collect(keys_deep(inputs(c)))
     idx_to_out = collect(keys_deep(outputs(c)))
     in_to_idx = Dict(v => k for (k, v) in enumerate(idx_to_in))
@@ -54,7 +53,7 @@ function new_names(src::Input,
         subsubcomp_name_to_idx, 
         in_to_idx, 
         out_to_idx)
-    return (in_to_idx[src.id], )
+    return (Input(in_to_idx[src.id]), )
 end
 
 function new_names(dest::Output, 
@@ -63,7 +62,7 @@ function new_names(dest::Output,
         in_to_idx, 
         out_to_idx, 
         subcomp_mappings)
-    return (out_to_idx[dest.id], )
+    return (Output(out_to_idx[dest.id]), )
 end
 
 function new_names(src::CompIn, 
@@ -75,20 +74,26 @@ function new_names(src::CompIn,
     comp_name = src.comp_name
     in_name = src.in_name
     subcomp = flt_subs[comp_name]
-    rec = receivers(subcomp, Input(in_name))
-    indexed = map(rec) do r
+    if subcomp isa PrimitiveComponent
+        rec = map(Output, Base.keys(Circuits.outputs(subcomp)))
+    else
+        rec = receivers(subcomp, Input(in_name))
+    end
+    indexed = []
+    for r in rec
         if r isa CompIn
             subcomp_name = subsubcomp_name_to_idx[(src.comp_name, r.comp_name)]
-            CompIn(subcomp_name, r.in_name)
+            push!(indexed, CompIn(subcomp_name, r.in_name))
         elseif r isa Output
-            rec_in_c = receivers(c, CompOut(subcomp_name, r.id))
-            map(rec_in_c) do target
-                new_names(target,
-                          c,
-                          flt_subs,
-                          subsubcomp_name_to_idx, 
-                          in_to_idx, 
-                          out_to_idx)
+            rec_in_c = receivers(c, CompOut(comp_name, r.id))
+            for t in rec_in_c
+                append!(indexed, new_names(t,
+                                           c,
+                                           flt_subs,
+                                           subsubcomp_name_to_idx, 
+                                           in_to_idx, 
+                                           out_to_idx)
+                       )
             end
         end
     end
@@ -104,11 +109,15 @@ function new_names(dest::CompOut,
     comp_name = dest.comp_name
     out_name = dest.out_name
     subcomp = flt_subs[comp_name]
-    inp = inputters(subcomp, Output(in_name))
+    if subcomp isa PrimitiveComponent
+        inp = ()
+    else
+        inp = inputters(subcomp, Output(out_name))
+    end
     indexed = map(inp) do r
         if r isa CompOut
             subcomp_name = subsubcomp_name_to_idx[(dest.comp_name, r.comp_name)]
-            CompOut(subcomp_name, r.in_name)
+            CompOut(subcomp_name, r.out_name)
         else
             ()
         end
@@ -116,8 +125,8 @@ function new_names(dest::CompOut,
     return Iterators.flatten(indexed)
 end
 
-function flatten(c::CompositeComponent)
-    flt_subs_and_mappings = map(flatten, c.subcomponents)
+function _flatten(c::CompositeComponent)
+    flt_subs_and_mappings = map(_flatten, c.subcomponents)
     flt_subs = map(first, flt_subs_and_mappings)
     subcomp_mappings = map(second, flt_subs_and_mappings)
     # each element of subcomp_mappings is `input_map, output_map` giving the name
@@ -152,7 +161,7 @@ function flatten(c::CompositeComponent)
                              flt_subs, 
                              subsubcomp_name_to_idx, 
                              in_to_idx, 
-                             out_to_idx)
+                             out_to_idx) 
 
         for (s, d) in Iterators.product(srcnames, dstnames)
             push!(new_edges, s => d)
@@ -161,8 +170,12 @@ function flatten(c::CompositeComponent)
     new_comp = CompositeComponent(
             IndexedValues([inputs(c)[name] for name in idx_to_in]),
             IndexedValues([outputs(c)[name] for name in idx_to_out]),
-                                  flt_subs,
-                                  new_edges
-                                 )
+            flt_subs,
+            new_edges)
     return (new_comp, in_to_idx, out_to_idx)
+end
+
+function flatten(c::CompositeComponent)
+    new_comp, in_to_idx, out_to_idx = _flatten(c)
+    return new_comp
 end
