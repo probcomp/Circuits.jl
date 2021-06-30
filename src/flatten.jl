@@ -1,10 +1,9 @@
-# The flattening algorithm:
+#
+# The flattening problem:
 #
 # Each CompositeComponent has some set of Inputs and Outputs.
 # As well as some set of "inner" CompIns and CompOuts.
 # 
-# The algorithm is recursive. 
-#
 # For each Input `I` of the composite component, there is some set of edges from `I` to CompIn (or directly to Output).
 # If edge E is an edge from `I` to a CompIn `C_in`
 # We must associate new edges from `I` to sub-components which are
@@ -19,13 +18,8 @@
 #     |                             |
 #
 # The new edge for `I` must go to `prim` directly.
-# Interface functions used:
 # 
-# - inputters: for a `NodeName` name (which is the name of a component in a larger component), 
-# iterator over all other `NodeName` instances which send an input to name.
-# 
-# - receivers: for a `NodeName` name, iterator over all other `NodeName` instance which receive
-# from name.
+
 
 # Defines "leaves" for `Base.iterate`.
 # I suspect this is required for Iterators.flatten
@@ -40,7 +34,7 @@ Base.iterate(inp::CompIn, n::Nothing) = n
 
 second(t::Tuple) = t[2 : end]
 
-# Leaf.
+# Anything which is not a CompositeComponent is a leaf.
 function _flatten(c)
     idx_to_in = collect(keys_deep(inputs(c)))
     idx_to_out = collect(keys_deep(outputs(c)))
