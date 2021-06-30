@@ -258,7 +258,11 @@ function implement(c::CompositeComponent, t::Target,
 
     # now we want to implement the top-level inputs/outputs so that they are compatible
     # with the `CompIn` and `CompOut` from the subcomponents
-    new_in, new_out = implement_inputs_and_outputs(c, new_comps, input_filter, output_filter, t, deep)
+    new_in, new_out = 
+        try implement_inputs_and_outputs(c, new_comps, input_filter, output_filter, t, deep)
+        catch e
+            @error("Error implementing inputs and outputs for CompositeComponent with abstract type $(abstract(c)).", exception=(e, catch_backtrace()))
+        end
 
     new_idx_to_node = collect(Iterators.flatten((
         (Input(k) for k in keys_deep(new_in)), (Output(k) for k in keys_deep(new_out)),
@@ -318,7 +322,9 @@ function implement_inputs_and_outputs(c, new_comps, input_filter, output_filter,
     get_new_input(key) =
         if haskey(input_connections, Input(key))
             val = inval(first(input_connections[Input(key)]))
-            @assert all(inval(compin) == val for compin in input_connections[Input(key)]) "Implementing this CompositeComponent leads to `CompIn`s which are connected to the same output being implemented at different levels!"
+            for compin in input_connections[Input(key)]
+                @assert inval(compin) == val "Implementing a CompositeComponent leads to `CompIn`s which are connected to the same output being implemented at different levels!  One version: $val.  Another version: $(inval(compin))."
+            end
             # TODO: there are situations where this check doesn't work very well, if we have deep-implemented
             # a subcomponent where the intermediary transformations of the values are non-standard.
             if !(has_abstract(val, inputs(c)[key]) || can_implement_to(inputs(c)[key], val, target))
@@ -330,7 +336,7 @@ function implement_inputs_and_outputs(c, new_comps, input_filter, output_filter,
             end
             val
         else
-            val = inputs(c)[key] 
+            val = inputs(c)[key]
             if !(val isa PrimitiveValue) && input_filter(key)
                 (deep ? implement_deep : implement)(val, target)
             else
