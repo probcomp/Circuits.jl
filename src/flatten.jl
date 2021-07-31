@@ -42,7 +42,8 @@ function _flatten(c)
     idx_to_out = collect(keys_deep(outputs(c)))
     in_to_idx = Dict(v => k for (k, v) in enumerate(idx_to_in))
     out_to_idx = Dict(v => k for (k, v) in enumerate(idx_to_out))
-    return (c, in_to_idx, out_to_idx)
+    subcomp_idx_to_nested_name = []
+    return (c, in_to_idx, out_to_idx, subcomp_idx_to_nested_name)
 end
 
 function new_names(src::Input, 
@@ -212,19 +213,26 @@ function _flatten(c::CompositeComponent)
     flt_subs_and_mappings = map(_flatten, c.subcomponents)
     flt_subs = map(first, flt_subs_and_mappings)
     subcomp_mappings = map(second, flt_subs_and_mappings)
+    idx_to_subcomp_names_from_flattening = map(last, flt_subs_and_mappings)
     idx_to_in = inputs(c) |> keys_deep |> collect
     idx_to_out = outputs(c) |> keys_deep |> collect
     in_to_idx = Dict(v => k for (k, v) in enumerate(idx_to_in))
     out_to_idx = Dict(v => k for (k, v) in enumerate(idx_to_out))
     idx_to_subsubcomp_name = []
 
+    # map from subcomp index in the flattened circuit this function outputs
+    # to the nested name of that subcomp in `c`
+    new_idx_to_subcomp_names = []
+
     for (name, subcomp) in pairs(flt_subs)
         if subcomp isa CompositeComponent 
             for (inner_index, _) in pairs(subcomp.subcomponents)
                 push!(idx_to_subsubcomp_name, (name, inner_index))
+                push!(new_idx_to_subcomp_names, name => idx_to_subcomp_names_from_flattening[name][inner_index])
             end
         else
             push!(idx_to_subsubcomp_name, (name, name))
+            push!(new_idx_to_subcomp_names, name)
         end
     end
 
@@ -258,7 +266,8 @@ function _flatten(c::CompositeComponent)
                                   IndexedValues([outputs(c)[name] for name in idx_to_out]),
                                   Iterators.flatten(flat_subsub(v) for v in flt_subs) |> collect,
                                   new_edges)
-    return (new_comp, in_to_idx, out_to_idx)
+
+    return (new_comp, in_to_idx, out_to_idx, new_idx_to_subcomp_names)
 end
 
 function flatten(c::CompositeComponent)
