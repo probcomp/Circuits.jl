@@ -2,6 +2,7 @@ module Circuits
 
 using Distributions: Categorical, ncategories, probs
 using Memoization
+using CircuitViz
 
 # returns a collection of the same top-level type mapping `name => name`
 names(t::Vector)     = Tuple(1:length(t))
