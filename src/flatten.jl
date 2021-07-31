@@ -37,7 +37,7 @@ Base.iterate(out::CompOut, n::Nothing) = n
 second(t::Tuple) = t[2 : end]
 
 # Anything which is not a CompositeComponent is a leaf.
-function _flatten(c)
+function flatten(c)
     idx_to_in = collect(keys_deep(inputs(c)))
     idx_to_out = collect(keys_deep(outputs(c)))
     in_to_idx = Dict(v => k for (k, v) in enumerate(idx_to_in))
@@ -208,9 +208,23 @@ function flat_subsub(v)
     end
 end
 
-function _flatten(c::CompositeComponent)
+function flatten(c::CompositeComponent; recurse = true)
+    flt_subs_and_mappings =
+    if recurse
+        map(flatten, c.subcomponents)
+    else
+        map(subcomponent -> (
+                             subcomponent,
+                             (
+                              Dict(name => name for name in keys(inputs(subcomponent))),
+                              Dict(name => name for name in keys(outputs(subcomponent))),
+                             ),
+                             Dict(name => name for name in keys(subcomponent.subcomponents))
+                            ),
+            c.subcomponents
+           ) 
+    end
 
-    flt_subs_and_mappings = map(_flatten, c.subcomponents)
     flt_subs = map(first, flt_subs_and_mappings)
     subcomp_mappings = map(second, flt_subs_and_mappings)
     idx_to_subcomp_names_from_flattening = map(last, flt_subs_and_mappings)
@@ -228,7 +242,8 @@ function _flatten(c::CompositeComponent)
         if subcomp isa CompositeComponent 
             for (inner_index, _) in pairs(subcomp.subcomponents)
                 push!(idx_to_subsubcomp_name, (name, inner_index))
-                push!(new_idx_to_subcomp_names, name => idx_to_subcomp_names_from_flattening[name][inner_index])
+                push!(new_idx_to_subcomp_names, 
+                      name => idx_to_subcomp_names_from_flattening[name][inner_index])
             end
         else
             push!(idx_to_subsubcomp_name, (name, name))
@@ -268,8 +283,4 @@ function _flatten(c::CompositeComponent)
                                   new_edges)
 
     return (new_comp, in_to_idx, out_to_idx, new_idx_to_subcomp_names)
-end
-
-function flatten(c::CompositeComponent)
-    return _flatten(c)
 end
