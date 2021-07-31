@@ -75,4 +75,7 @@ export has_abstract_of_type, abstract_to_type
 include("flatten.jl")
 export flatten
 
+include("inputs_outputs_to_components.jl")
+export inputs_outputs_to_components
+
 end
