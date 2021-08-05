@@ -75,6 +75,9 @@ export has_abstract_of_type, abstract_to_type
 include("inline.jl")
 export inline, prepare, step!
 
+include("viz.jl")
+export viz!
+
 include("inputs_outputs_to_components.jl")
 export inputs_outputs_to_components
 

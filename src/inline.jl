@@ -17,28 +17,14 @@ function PathEdge(out::Output, c_out::CompOut)
     return PathEdge((out.id, ), ())
 end
 
-# TODO: usage of an IdDict as the work queue
-# means that PathEdge instances might over-write each other -- especially at the toplevel component.
-#
-# This occurred previously when investigating a bug
-# with halting the algorithm at toplevel Input
-# ports.
-# For example, we might image:
-# () => (:t11, :neuron, 1)
-# --> CompOut(sync, 2 => 1)
-# () => (:t11, :neuron, 1)
-# --> CompOut(sync, 1 => 1)
-#
-# Here, the PathEdge instances are the same -- but they are
-# fed by separate CompOut ports.
-#
-# Ask George about this.
-
 mutable struct InlineState
     c::CompositeComponent
-    completed_paths::Vector{PathEdge}
-    primitives::Dict{Tuple, Any}
-    pmap::IdDict{PathEdge, Any}
+    completed_edges::Vector{PathEdge}
+    inputs::Dict{Tuple, Any}
+    internals::Dict{Tuple, Any}
+    outputs::Dict{Tuple, Any}
+    primitive_nodes::Vector{Any}
+    stack::Vector{Pair{PathEdge, Any}}
     marked::Vector{Tuple}
 end
 
@@ -52,30 +38,36 @@ end
 
 function Base.display(ds::InlineState)
     println("Completed edges:")
-    s = sort(ds.completed_paths; by = x -> length(x.current))
+    s = sort(ds.completed_edges; by = x -> length(x.current))
     for p in s
         println("$(p.current => p.start)")
     end
     println()
     println("Current work:")
-    for k in keys(ds.pmap)
-        work = ds.pmap[k]
-        println("$(k.current => k.start)\n --> $(work)")
+    for (path, work) in ds.stack
+        println("$(path.current => path.start)\n --> $(work)")
     end
 end
 
 function prepare(c::CompositeComponent)
     out_iter = output_iterator(c)
-    pmap = IdDict(map(out_iter) do ind
-                      map(inputters(c, ind)) do send
-                          PathEdge(ind, send) => send
-                      end
-                  end |> Iterators.flatten)
+    stack = map(out_iter) do ind
+        map(inputters(c, ind)) do send
+            PathEdge(ind, send) => send
+        end
+    end |> Iterators.flatten
+    outputs = Dict(map(out_iter) do ind
+        (ind.id, ) => ind
+    end)
+    stack = collect(stack)
     return InlineState(c, 
-                        PathEdge[], 
-                        Dict{Tuple, Vector{Any}}(), 
-                        pmap,
-                        Tuple[])
+                       PathEdge[], 
+                       Dict{Tuple, Any}(), 
+                       Dict{Tuple, Any}(),
+                       outputs,
+                       Any[],
+                       stack,
+                       Tuple[])
 end
 
 # Iterative BF traversal.
@@ -83,13 +75,11 @@ function step!(state::InlineState)
     c = state.c
     subcomps = c.subcomponents
     new_work = Pair{PathEdge, Any}[]
-    for (k, v) in state.pmap
-        append!(new_work, step!(c, k, v, state))
+    while !isempty(state.stack)
+        edge, work = pop!(state.stack)
+        append!(new_work, step!(c, edge, work, state))
     end
-    for path in new_work
-        cur, port = path
-        setindex!(state.pmap, port, cur)
-    end
+    append!(state.stack, new_work)
     return state
 end
 
@@ -133,13 +123,13 @@ function handle_input!(subcomp::CompositeComponent,
             send isa Input
             finished = PathEdge(new_edge.start,
                                 (send.id, ))
-            push!(state.completed_paths, finished)
-            setindex!(state.primitives, subcomp, finished.current)
+            push!(state.completed_edges, finished)
+            setindex!(state.inputs, send, 
+                      finished.current)
         else
             push!(new_work, new_edge => send)
         end
     end
-    delete!(state.pmap, par)
     return new_work
 end
 
@@ -150,7 +140,6 @@ function handle_compin!(subcomp, par::PathEdge,
     for send in senders
         push!(new_work, par => send)
     end
-    delete!(state.pmap, par)
     return new_work
 end
 
@@ -162,9 +151,19 @@ function handle_compout!(subcomp,
     finished = PathEdge(par.start,
                         (par.current..., comp_out.comp_name,
                          comp_out.out_name))
-    push!(state.completed_paths, finished)
-    setindex!(state.primitives, subcomp, finished.current)
-    delete!(state.pmap, par)
+    push!(state.completed_edges, finished)
+    primitive = subcomp
+
+    # Check -- have we already added this primitive to the
+    # primitive vector.
+    # We may have already encountered this primitive
+    # before.
+    index = findfirst(==(primitive), state.primitive_nodes)
+    if index == nothing
+        push!(state.primitive_nodes, primitive)
+        index = length(state.primitive_nodes)
+    end
+    setindex!(state.internals, index, finished.current)
 
     # If we've already encountered this primitive before, 
     # we've already added edges from this node before.
@@ -185,7 +184,7 @@ function handle_compout!(subcomp,
     for r in recs
         base = par.current
         port = (base..., comp_out.comp_name, r.in_name)
-        setindex!(state.primitives, subcomp, port)
+        setindex!(state.internals, index, port)
         for send in inputters(subcomp, r)
             p = PathEdge(port, port[1 : end - 2])
             push!(senders, p => send)
@@ -213,7 +212,6 @@ function handle_compout!(subcomp::CompositeComponent,
     for send in senders
         push!(new_work, new_edge => send)
     end
-    delete!(state.pmap, par)
     return new_work
 end
 
@@ -249,10 +247,47 @@ function step!(c::CompositeComponent,
     return new_work
 end
 
-function inline(c::CompositeComponent)
+function _inline(c::CompositeComponent)
     state = prepare(c)
-    while !isempty(state.pmap)
+    while !isempty(state.stack)
         step!(state)
     end
     return state
+end
+
+function create_new_edges_from_state(state::InlineState)
+    map(state.completed_edges) do p
+        start = p.start
+        finish = p.current
+        if length(start) == 1
+            tg = getindex(state.outputs, start)
+        else
+            tg = getindex(state.internals, start)
+            tg = CompIn(tg, start[end])
+        end
+        if length(finish) == 1
+            src = getindex(state.inputs, finish)
+        else
+            src = getindex(state.internals, finish)
+            src = CompOut(src, finish[end])
+        end
+        src => tg
+    end
+end
+
+function create_cc_from_state(state::InlineState)
+    original = state.c
+    internal_nodes = state.primitive_nodes
+    internal_edges = create_new_edges_from_state(state)
+    return CompositeComponent(
+                              original.input,
+                              original.output,
+                              state.primitive_nodes,
+                              internal_edges,
+                             )
+end
+
+function inline(c::CompositeComponent)
+    state = _inline(c)
+    return create_cc_from_state(state)
 end

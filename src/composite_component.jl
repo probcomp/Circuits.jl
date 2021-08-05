@@ -496,7 +496,7 @@ function _subcomponent_graph(c::CompositeComponent)
     graph = SimpleDiGraph(length(idx_to_name))
     for (inname, outname) in get_edges(c)
         if inname isa CompOut && outname isa CompIn
-            add_edge!(graph, Edge(name_to_idx[inname.comp_name], name_to_idx[outname.comp_name]))
+            LightGraphs.add_edge!(graph, Edge(name_to_idx[inname.comp_name], name_to_idx[outname.comp_name]))
         end
     end
     return (graph, idx_to_name, name_to_idx)
