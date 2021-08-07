@@ -71,13 +71,13 @@ function prepare(c::CompositeComponent)
 end
 
 # Iterative BF traversal.
-function step!(state::InlineState)
+function step!(state::InlineState; treat_as_primitive = s -> false)
     c = state.c
     subcomps = c.subcomponents
     new_work = Pair{PathEdge, Any}[]
     while !isempty(state.stack)
         edge, work = pop!(state.stack)
-        append!(new_work, step!(c, edge, work, state))
+        append!(new_work, step!(c, edge, work, state, treat_as_primitive))
     end
     append!(state.stack, new_work)
     return state
@@ -97,15 +97,25 @@ function getindex_recurse(c::CompositeComponent, addr::Tuple)
     return getindex_recurse(subcomp, addr[2 : end])
 end
 
-# Here, we are moving from an inner CompositeComponent
-# to the next nesting level.
-# Therefore, the new work needs to be created:
-# 1. Turn the Input into a CompIn.
-# 2. Get all the senders to that CompIn.
-# 3. Add those senders to the work queue.
 function handle_input!(subcomp::CompositeComponent, 
         par::PathEdge, inp::Input, 
         state::InlineState)
+    # Check if at top level.
+    if isempty(par.current)
+        finished = PathEdge(par.start,
+                            (inp.id, ))
+        push!(state.completed_edges, finished)
+        setindex!(state.inputs, inp, 
+                  finished.current)
+        return []
+    end
+
+    # Here, we are moving from an inner CompositeComponent
+    # to the next nesting level.
+    # Therefore, the new work needs to be created:
+    # 1. Turn the Input into a CompIn.
+    # 2. Get all the senders to that CompIn.
+    # 3. Add those senders to the work queue.
     comp_in = CompIn(par.current[end], inp.id)
     new_edge = PathEdge(par.start, par.current[1 : end - 1])
     subcomps = state.c.subcomponents
@@ -145,7 +155,7 @@ end
 
 # This means -- we've hit a primitive.
 # There's no other way to hit a primitive.
-function handle_compout!(subcomp, 
+function handle_compout_primitive!(subcomp, 
         par::PathEdge, comp_out::CompOut,
         state::InlineState)
     finished = PathEdge(par.start,
@@ -199,7 +209,7 @@ function handle_compout!(subcomp,
     return senders
 end
 
-# This is handling an PathEdge from a parent CompositeComponent
+# This is handling a PathEdge from a parent CompositeComponent
 # to a CompOut which comes from a nested CompositeComponent.
 function handle_compout!(subcomp::CompositeComponent, 
         par::PathEdge, comp_out::CompOut,
@@ -215,12 +225,27 @@ function handle_compout!(subcomp::CompositeComponent,
     return new_work
 end
 
+# Fallback to primitive.
+function handle_compout!(subcomp, par::PathEdge, 
+        comp_out::CompOut, state::InlineState)
+    return handle_compout_primitive!(subcomp, par, comp_out, state)
+end
+
+function check_recurse_compout!(subcomp, par::PathEdge, 
+        comp_out::CompOut, state::InlineState, treat_as_primitive)
+    if treat_as_primitive(subcomp)
+        return handle_compout_primitive!(subcomp, par, comp_out, state)
+    else
+        return handle_compout!(subcomp, par, comp_out, state)
+    end
+end
+
 function step!(c::CompositeComponent, 
         par::PathEdge, v::CompOut, 
-        state::InlineState)
+        state::InlineState, treat_as_primitive)
     subcomp_name = (par.current..., v.comp_name)
     subcomp = getindex_recurse(c, subcomp_name)
-    new_work = handle_compout!(subcomp, par, v, state)
+    new_work = check_recurse_compout!(subcomp, par, v, state, treat_as_primitive)
     return new_work
 end
 
@@ -231,7 +256,7 @@ end
 # composite component.
 function step!(c::CompositeComponent,
         par::PathEdge, v::Input,
-        state::InlineState)
+        state::InlineState, treat_as_primitive)
     subcomp_name = par.current[1 : end - 1]
     subcomp = getindex_recurse(c, subcomp_name)
     new_work = handle_input!(subcomp, par, v, state)
@@ -240,17 +265,17 @@ end
 
 function step!(c::CompositeComponent, 
         par::PathEdge, v::CompIn, 
-        state::InlineState)
+        state::InlineState, treat_as_primitive)
     subcomp_name = par.current
     subcomp = getindex_recurse(c, subcomp_name)
     new_work = handle_compin!(subcomp, par, v, state)
     return new_work
 end
 
-function _inline(c::CompositeComponent)
+function _inline(c::CompositeComponent; treat_as_primitive = s -> false)
     state = prepare(c)
     while !isempty(state.stack)
-        step!(state)
+        step!(state; treat_as_primitive = treat_as_primitive)
     end
     return state
 end
@@ -287,7 +312,9 @@ function create_cc_from_state(state::InlineState)
                              )
 end
 
-function inline(c::CompositeComponent)
-    state = _inline(c)
-    return create_cc_from_state(state)
+function inline(c::CompositeComponent; treat_as_primitive = s -> false)
+    state = _inline(c; treat_as_primitive = treat_as_primitive)
+    names = Dict(v => k[1 : end - 1] 
+                 for (k, v) in state.internals)
+    return create_cc_from_state(state), names, state
 end

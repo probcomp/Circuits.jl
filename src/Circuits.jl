@@ -72,13 +72,13 @@ export inputters, receivers
 export topologically_ordered_subcomponents
 export has_abstract_of_type, abstract_to_type
 
+include("inputs_outputs_to_components.jl")
+export inputs_outputs_to_components
+
 include("inline.jl")
 export inline, prepare, step!
 
 include("viz.jl")
 export viz!
-
-include("inputs_outputs_to_components.jl")
-export inputs_outputs_to_components
 
 end
