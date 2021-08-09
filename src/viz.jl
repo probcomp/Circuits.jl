@@ -8,14 +8,8 @@ end
 function add_node!(g, name::Symbol, 
         subcomp::PrimitiveComponent)
     node_attrs = Dict{Symbol, Any}(:shape => "triangle",
-                                   :label => "$(name)")
-    CircuitViz.add_vertex!(g, node_attrs)
-end
-
-function add_node!(g, name::Symbol, 
-        subcomp::CompositeComponent)
-    node_attrs = Dict{Symbol, Any}(:shape => "square",
-                                   :label => "$(name)")
+                                   :label => "Neuron"
+                                   )
     CircuitViz.add_vertex!(g, node_attrs)
 end
 
@@ -29,21 +23,13 @@ end
 function add_node!(g, name::String, 
         subcomp::PrimitiveComponent)
     node_attrs = Dict{Symbol, Any}(:shape => "triangle",
-                                   :label => name)
+                                   :label => "Neuron"
+                                  )
     CircuitViz.add_vertex!(g, node_attrs)
 end
 
-function add_node!(g, name::String, 
-        subcomp::CompositeComponent; 
-        node_attrs = Dict{Symbol, Any}(:shape => "square",
-                                       :label => name))
-    CircuitViz.add_vertex!(g, node_attrs)
-end
-
-function add_node!(g, name_fn::Function, subcomp::CompositeComponent)
-    node_attrs = Dict{Symbol, Any}(:shape => "square",
-                                   :label => repr(name_fn(subcomp)))
-    CircuitViz.add_vertex!(g, node_attrs)
+function add_node!(g, name, subcomp)
+    error()
 end
 
 function convert_to_catlab_graph(c::CompositeComponent)
@@ -91,15 +77,15 @@ function convert_to_catlab_graph(c::CompositeComponent,
 end
 
 function add_node!(g, input::Input)
-    node_attrs = Dict{Symbol, Any}(:shape => "point",
-                                   #:label => "$(input.id)"
+    node_attrs = Dict{Symbol, Any}(:shape => "circle",
+                                   :label => "Spike"
                                   )
     CircuitViz.add_vertex!(g, node_attrs)
 end
 
 function add_node!(g, output::Output)
-    node_attrs = Dict{Symbol, Any}(:shape => "point",
-                                   #:label => "$(output.id)"
+    node_attrs = Dict{Symbol, Any}(:shape => "circle",
+                                   :label => "Spike",
                                   )
     CircuitViz.add_vertex!(g, node_attrs)
 end
@@ -165,63 +151,16 @@ function convert_to_catlab_graph(state::InlineState)
     return g
 end
 
-function convert_to_catlab_graph(state::InlineState, cc_name_fn)
-    g = CircuitViz.Graph()
-    primitives = Dict{Any, Any}()
-    name_map = _create_name_map(state)
-    count = 1
-    for inp in state.inputs
-        snd = inp[2]
-        add_node!(g, snd)
-        primitives[(snd.id, )] = count
-        count += 1
-    end
-
-    for out in state.outputs
-        snd = out[2]
-        add_node!(g, snd)
-        primitives[(snd.id, )] = count
-        count += 1
-    end
-
-    edges = map(state.completed_edges) do p
-        Pair(map((p.current, p.start)) do s
-                 if length(s) == 1
-                     if haskey(primitives, s)
-                         tg = getindex(primitives, s)
-                     end
-                 else
-                     if haskey(primitives, s[1 : end - 1])
-                         tg = getindex(primitives, s[1 : end - 1])
-                     else
-                         tg = getindex(state.internals, s)
-                         name = getindex(name_map, tg)
-                         name = name_converter(name)
-                         tg = getindex(state.primitive_nodes, tg)
-                         add_node!(g, name, tg)
-                         primitives[s[1 : end - 1]] = count
-                         tg = count
-                         count += 1
-                     end
-                 end
-                 return tg
-             end...)
-    end
-    for (k, v) in edges
-        CircuitViz.add_edge!(g, k, v)
-    end
-    return g
-end
-
 function viz!(state::InlineState; 
         base_path = "$(gensym("digraph"))")
     g = convert_to_catlab_graph(state)
     CircuitViz.compile!(g; base_path = base_path)
 end
 
-function viz!(c::CompositeComponent)
+function viz!(c::CompositeComponent;
+        base_path = "$(gensym("digraph"))")
     g = convert_to_catlab_graph(c)
-    CircuitViz.compile!(g)
+    CircuitViz.compile!(g; base_path = base_path)
 end
 
 function viz!(c::CompositeComponent, names::Dict)

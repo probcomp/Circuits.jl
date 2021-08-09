@@ -17,6 +17,10 @@ function PathEdge(out::Output, c_out::CompOut)
     return PathEdge((out.id, ), ())
 end
 
+function PathEdge(out::Output, c_out::Input)
+    return PathEdge((out.id, ), ())
+end
+
 mutable struct InlineState
     c::CompositeComponent
     completed_edges::Vector{PathEdge}
