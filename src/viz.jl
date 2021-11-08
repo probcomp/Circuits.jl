@@ -23,7 +23,7 @@ end
 function add_node!(g, name::String, 
         subcomp::PrimitiveComponent)
     node_attrs = Dict{Symbol, Any}(:shape => "triangle",
-                                   :label => "Neuron"
+                                   :label => "$(name)"
                                   )
     CircuitViz.add_vertex!(g, node_attrs)
 end

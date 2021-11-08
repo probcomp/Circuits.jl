@@ -172,20 +172,13 @@ function handle_compout_primitive!(subcomp,
     # primitive vector.
     # We may have already encountered this primitive
     # before.
-    index = findfirst(el -> el == primitive, state.primitive_nodes)
-    if index == nothing
-        push!(state.primitive_nodes, primitive)
-        index = length(state.primitive_nodes)
-    end
-    setindex!(state.internals, index, finished.current)
-
-    # If we've already encountered this primitive before, 
-    # we've already added edges from this node before.
-    # Return immediately with no new work edges.
     component_addr = (par.current..., comp_out.comp_name)
     check_mark(state, component_addr) && return []
+    push!(state.primitive_nodes, primitive)
+    index = length(state.primitive_nodes)
+    setindex!(state.internals, index, finished.current)
 
-    # Else, we need to add new edges.
+    # We need to add new edges.
     recs = inputs(subcomp) |> keys_deep
     recs = map(v -> CompIn(comp_out.comp_name, v), recs)
 
