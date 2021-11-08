@@ -172,7 +172,7 @@ function handle_compout_primitive!(subcomp,
     # primitive vector.
     # We may have already encountered this primitive
     # before.
-    index = findfirst(==(primitive), state.primitive_nodes)
+    index = findfirst(el -> el == primitive, state.primitive_nodes)
     if index == nothing
         push!(state.primitive_nodes, primitive)
         index = length(state.primitive_nodes)

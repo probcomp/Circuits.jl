@@ -6,7 +6,7 @@ function add_node!(g, name::Symbol,
 end
 
 function add_node!(g, name::Symbol, 
-        subcomp::PrimitiveComponent)
+        subcomp::T) where T <: PrimitiveComponent
     node_attrs = Dict{Symbol, Any}(:shape => "triangle",
                                    :label => "Neuron"
                                    )
@@ -29,7 +29,7 @@ function add_node!(g, name::String,
 end
 
 function add_node!(g, name, subcomp)
-    error()
+    error("$(typeof(subcomp)) not supported for `add_node!`")
 end
 
 function convert_to_catlab_graph(c::CompositeComponent)
@@ -103,47 +103,76 @@ function _create_name_map(state::InlineState)
     return Dict(k => v[1 : end - 1] for (k, v) in d)
 end
 
+function handle!(g, in::Input, state, 
+        primitives, name_map)
+    id = in.id
+    node_id = primitives[(:input, id)]
+    return node_id
+end
+
+function handle!(g, out::Output, state, 
+        primitives, name_map)
+    id = out.id
+    node_id = primitives[(:output, id)]
+    return node_id
+end
+
+function handle!(g, cout::CompOut, state, 
+        primitives, name_map)
+    id = cout.comp_name
+    if haskey(primitives, (:internal, id))
+        node_id = primitives[(:internal, id)]
+        return node_id
+    else
+        name = getindex(name_map, id)
+        name = name_converter(name)
+        prim = state.primitive_nodes[id]
+        add_node!(g, name, prim)
+        new_id = length(primitives) + 1
+        primitives[(:internal, id)] = new_id
+        return new_id
+    end
+end
+
+function handle!(g, cin::CompIn, state, 
+        primitives, name_map)
+    id = cin.comp_name
+    if haskey(primitives, (:internal, id))
+        node_id = primitives[(:internal, id)]
+        return node_id
+    else
+        name = getindex(name_map, id)
+        name = name_converter(name)
+        prim = state.primitive_nodes[id]
+        add_node!(g, name, prim)
+        new_id = length(primitives) + 1
+        primitives[(:internal, id)] = new_id
+        return new_id
+    end
+end
+
 function convert_to_catlab_graph(state::InlineState)
     g = CircuitViz.Graph()
-    primitives = Dict{Any, Any}()
     name_map = _create_name_map(state)
-    count = 1
+    new_edges = create_new_edges_from_state(state)
+    primitives = Dict{Any, Any}()
+
     for inp in state.inputs
         snd = inp[2]
         add_node!(g, snd)
-        primitives[(snd.id, )] = count
-        count += 1
+        primitives[(:input, snd.id)] = length(primitives) + 1
     end
 
     for out in state.outputs
         snd = out[2]
         add_node!(g, snd)
-        primitives[(snd.id, )] = count
-        count += 1
+        primitives[(:output, snd.id)] = length(primitives) + 1
     end
 
-    edges = map(state.completed_edges) do p
-        Pair(map((p.current, p.start)) do s
-                 if length(s) == 1
-                     if haskey(primitives, s)
-                         tg = getindex(primitives, s)
-                     end
-                 else
-                     if haskey(primitives, s[1 : end - 1])
-                         tg = getindex(primitives, s[1 : end - 1])
-                     else
-                         tg = getindex(state.internals, s)
-                         name = getindex(name_map, tg)
-                         name = name_converter(name)
-                         tg = getindex(state.primitive_nodes, tg)
-                         add_node!(g, name, tg)
-                         primitives[s[1 : end - 1]] = count
-                         tg = count
-                         count += 1
-                     end
-                 end
-                 return tg
-             end...)
+    edges = map(new_edges) do (from, to)
+        f = handle!(g, from, state, primitives, name_map)
+        t = handle!(g, to, state, primitives, name_map)
+        Pair(f, t)
     end
     for (k, v) in edges
         CircuitViz.add_edge!(g, k, v)

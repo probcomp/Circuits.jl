@@ -77,6 +77,7 @@ export inputs_outputs_to_components
 include("inline.jl")
 export inline, prepare, step!
 
+using CircuitViz
 include("viz.jl")
 export viz!
 
